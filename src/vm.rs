@@ -115,10 +115,12 @@ impl<'a> VirtualMachine<'a> {
             self.ip += 1;
         }
     }
-    pub fn interpret(&mut self, chunk: &'a Chunk) -> InterpretResult {
-        self.chunk = Some(chunk);
-        self.ip = 0;
-        self.run()
+    pub fn interpret(source: &str) -> InterpretResult {
+        // self.chunk = Some(chunk);
+        // self.ip = 0;
+        // self.run()
+        // compile(source);
+        InterpretResult::Ok
     }
     fn binary_op(&mut self, op: Instruction) -> Result<Value, String> {
         if self.stack.len() >= 2 {
@@ -136,9 +138,4 @@ impl<'a> VirtualMachine<'a> {
             Err(format!("Stack doesn't have operands for binary operation"))
         }
     }
-    // pub fn free(&mut self) {
-    //     self.chunk = None;
-    //     self.ip = 0;
-    //     self.stack.clear();
-    // }
 }
