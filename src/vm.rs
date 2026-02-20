@@ -115,12 +115,11 @@ impl<'a> VirtualMachine<'a> {
             self.ip += 1;
         }
     }
-    pub fn interpret(source: &str) -> InterpretResult {
-        // self.chunk = Some(chunk);
-        // self.ip = 0;
-        // self.run()
-        // compile(source);
-        InterpretResult::Ok
+    pub fn interpret(&mut self, chunk: &'a Chunk) -> InterpretResult {
+        self.chunk = Some(&chunk);
+        self.ip = 0;
+        let result = self.run();
+        result
     }
     fn binary_op(&mut self, op: Instruction) -> Result<Value, String> {
         if self.stack.len() >= 2 {

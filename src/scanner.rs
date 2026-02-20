@@ -1,8 +1,8 @@
-pub struct Scanner<'a> {
+pub struct Scanner {
     start: usize,   // start of current lexme
     current: usize, // current character
-    line: usize,    // what line current lexme is on?
-    source: &'a [u8],
+    line: u64,      // what line current lexme is on?
+    source: Vec<u8>,
 }
 
 fn is_digit(byte: &u8) -> bool {
@@ -13,8 +13,8 @@ fn is_alpha(byte: &u8) -> bool {
     byte.is_ascii_alphabetic() || byte == &b'_'
 }
 
-impl<'a> Scanner<'a> {
-    pub fn new(source: &'a [u8]) -> Self {
+impl Scanner {
+    pub fn new(source: Vec<u8>) -> Self {
         Self {
             start: 0,
             current: 0,
@@ -25,12 +25,12 @@ impl<'a> Scanner<'a> {
     fn is_at_end(&self) -> bool {
         self.current >= self.source.len()
     }
+
     fn make_token(&self, token: TokenType) -> Token {
         Token {
             variant: token,
-            length: self.current - self.start,
+            lexeme: self.source[self.start..self.current].to_vec(),
             line: self.line,
-            start: self.start,
         }
     }
 
@@ -54,6 +54,8 @@ impl<'a> Scanner<'a> {
                         while !self.is_at_end() && self.peek() != b'\n' {
                             self.advance();
                         }
+                    } else {
+                        break;
                     }
                 }
                 _ => return,
@@ -102,7 +104,8 @@ impl<'a> Scanner<'a> {
             return self.make_token(TokenType::Eof);
         }
 
-        let c = self.source[self.advance()];
+        let current_i = self.advance();
+        let c = self.source[current_i];
 
         match c {
             c if is_alpha(&c) => {
@@ -229,7 +232,8 @@ impl<'a> Scanner<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum TokenType {
     // Single-character tokens.
     LeftParen,
@@ -282,10 +286,9 @@ pub enum TokenType {
     Eof,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub variant: TokenType,
-    pub start: usize,
-    pub length: usize,
-    pub line: usize,
+    pub lexeme: Vec<u8>,
+    pub line: u64,
 }
