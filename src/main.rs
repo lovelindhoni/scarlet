@@ -1,22 +1,44 @@
 mod chunk;
 mod common;
 mod compiler;
-mod debug;
+mod error;
 mod scanner;
+mod trace;
 mod vm;
 
 use std::fs;
+use std::process;
 
 use crate::compiler::compile;
-use crate::debug::diassemble;
+use crate::trace::diassemble;
 use crate::vm::VirtualMachine;
 
 fn main() {
-    let source = fs::read("./main.cia").unwrap();
+    let source = match fs::read("./main.cia") {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("IO Error: {}", e);
+            process::exit(1);
+        }
+    };
+
     let mut vm = VirtualMachine::new();
-    let compliation_result = compile(source);
-    if let Ok(chunk) = compliation_result {
-        diassemble(&chunk).unwrap();
-        vm.interpret(&chunk).unwrap();
+
+    let chunk = match compile(source) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Compile Error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    if let Err(e) = diassemble(&chunk) {
+        eprintln!("Trace Error: {}", e);
+        process::exit(1);
+    }
+
+    if let Err(e) = vm.interpret(&chunk) {
+        eprintln!("Runtime Error: {}", e);
+        process::exit(1);
     }
 }

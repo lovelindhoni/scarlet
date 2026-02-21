@@ -7,4 +7,4 @@ edition = "2024"
 trace = []
 
 [dependencies]
-anyhow = "1.0.102"
+thiserror = "2.0.18"

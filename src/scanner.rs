@@ -1,7 +1,10 @@
+use crate::error::ScanError;
+use std::fmt;
+
 pub struct Scanner {
-    start: usize,   // start of current lexme
+    start: usize,   // start of current lexeme
     current: usize, // current character
-    line: u64,      // what line current lexme is on?
+    line: u64,      // what line current lexeme is on?
     source: Vec<u8>,
 }
 
@@ -97,11 +100,11 @@ impl Scanner {
         }
     }
 
-    pub fn scan_token(&mut self) -> Token {
+    pub fn scan_token(&mut self) -> Result<Token, ScanError> {
         self.skip_ignorables();
         self.start = self.current;
         if self.is_at_end() {
-            return self.make_token(TokenType::Eof);
+            return Ok(self.make_token(TokenType::Eof));
         }
 
         let current_i = self.advance();
@@ -149,7 +152,7 @@ impl Scanner {
 
                     _ => TokenType::Identifier,
                 };
-                self.make_token(identifier)
+                Ok(self.make_token(identifier))
             }
             c if is_digit(&c) => {
                 while !self.is_at_end() && is_digit(&self.peek()) {
@@ -165,20 +168,20 @@ impl Scanner {
                         self.advance();
                     }
                 }
-                self.make_token(TokenType::Number)
+                Ok(self.make_token(TokenType::Number))
             }
-            b'(' => self.make_token(TokenType::LeftParen),
-            b')' => self.make_token(TokenType::RightParen),
-            b'{' => self.make_token(TokenType::LeftBrace),
-            b'}' => self.make_token(TokenType::RightBrace),
-            b';' => self.make_token(TokenType::Semicolon),
-            b',' => self.make_token(TokenType::Comma),
-            b'.' => self.make_token(TokenType::Dot),
-            b'-' => self.make_token(TokenType::Minus),
-            b'+' => self.make_token(TokenType::Plus),
-            b'/' => self.make_token(TokenType::Slash),
-            b'*' => self.make_token(TokenType::Star),
-            b'%' => self.make_token(TokenType::Modulo),
+            b'(' => Ok(self.make_token(TokenType::LeftParen)),
+            b')' => Ok(self.make_token(TokenType::RightParen)),
+            b'{' => Ok(self.make_token(TokenType::LeftBrace)),
+            b'}' => Ok(self.make_token(TokenType::RightBrace)),
+            b';' => Ok(self.make_token(TokenType::Semicolon)),
+            b',' => Ok(self.make_token(TokenType::Comma)),
+            b'.' => Ok(self.make_token(TokenType::Dot)),
+            b'-' => Ok(self.make_token(TokenType::Minus)),
+            b'+' => Ok(self.make_token(TokenType::Plus)),
+            b'/' => Ok(self.make_token(TokenType::Slash)),
+            b'*' => Ok(self.make_token(TokenType::Star)),
+            b'%' => Ok(self.make_token(TokenType::Modulo)),
 
             b'!' => {
                 let variant = if self.match_next(b'=') {
@@ -186,7 +189,7 @@ impl Scanner {
                 } else {
                     TokenType::Bang
                 };
-                self.make_token(variant)
+                Ok(self.make_token(variant))
             }
             b'=' => {
                 let variant = if self.match_next(b'=') {
@@ -194,7 +197,7 @@ impl Scanner {
                 } else {
                     TokenType::Equal
                 };
-                self.make_token(variant)
+                Ok(self.make_token(variant))
             }
             b'<' => {
                 let variant = if self.match_next(b'=') {
@@ -202,7 +205,7 @@ impl Scanner {
                 } else {
                     TokenType::Less
                 };
-                self.make_token(variant)
+                Ok(self.make_token(variant))
             }
             b'>' => {
                 let variant = if self.match_next(b'=') {
@@ -210,7 +213,7 @@ impl Scanner {
                 } else {
                     TokenType::Greater
                 };
-                self.make_token(variant)
+                Ok(self.make_token(variant))
             }
 
             b'"' => {
@@ -221,13 +224,21 @@ impl Scanner {
                     self.advance();
                 }
                 if self.is_at_end() {
-                    self.make_token(TokenType::UnterminatedString);
+                    return Err(ScanError::UnterminatedString {
+                        message: "Unterminated String".to_owned(),
+                        line: self.line,
+                        lexeme: self.source[self.start..self.current].to_owned(),
+                    });
                 }
                 self.advance(); // closing double quote
-                self.make_token(TokenType::String)
+                Ok(self.make_token(TokenType::String))
             }
 
-            _ => self.make_token(TokenType::UnexpectedCharacter),
+            _ => Err(ScanError::UnexpectedCharacter {
+                message: "Unexpected Character".to_owned(),
+                line: self.line,
+                lexeme: self.source[self.start..self.current].to_owned(),
+            }),
         }
     }
 }
@@ -281,9 +292,63 @@ pub enum TokenType {
     Let,
     While,
 
-    UnexpectedCharacter,
-    UnterminatedString,
     Eof,
+}
+
+impl fmt::Display for TokenType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            // Single-character tokens
+            TokenType::LeftParen => "(",
+            TokenType::RightParen => ")",
+            TokenType::LeftBrace => "{",
+            TokenType::RightBrace => "}",
+            TokenType::Comma => ",",
+            TokenType::Dot => ".",
+            TokenType::Minus => "-",
+            TokenType::Plus => "+",
+            TokenType::Semicolon => ";",
+            TokenType::Slash => "/",
+            TokenType::Star => "*",
+            TokenType::Modulo => "%",
+
+            // One or two character tokens
+            TokenType::Bang => "!",
+            TokenType::BangEqual => "!=",
+            TokenType::Equal => "=",
+            TokenType::EqualEqual => "==",
+            TokenType::Greater => ">",
+            TokenType::GreaterEqual => ">=",
+            TokenType::Less => "<",
+            TokenType::LessEqual => "<=",
+
+            // Literals
+            TokenType::Identifier => "identifier",
+            TokenType::String => "string",
+            TokenType::Number => "number",
+
+            // Keywords
+            TokenType::And => "and",
+            TokenType::Else => "else",
+            TokenType::False => "false",
+            TokenType::For => "for",
+            TokenType::Fun => "fun",
+            TokenType::If => "if",
+            TokenType::Nil => "nil",
+            TokenType::Or => "or",
+            TokenType::Print => "print",
+            TokenType::Return => "return",
+            TokenType::Super => "super",
+            TokenType::This => "this",
+            TokenType::True => "true",
+            TokenType::Let => "let",
+            TokenType::While => "while",
+
+            TokenType::Eof => "end of file",
+        };
+
+        write!(f, "{s}")
+    }
 }
 
 #[derive(Debug, Clone)]

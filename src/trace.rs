@@ -1,7 +1,8 @@
-use anyhow::{Context, Result as AnyhowResult, anyhow};
-
 use crate::chunk::Chunk;
 use crate::common::Instruction;
+use crate::error::TraceError;
+
+type Result<T> = std::result::Result<T, TraceError>;
 
 fn simple_instruction(idx: usize, chunk: &Chunk, opcode: &str) {
     if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
@@ -11,10 +12,12 @@ fn simple_instruction(idx: usize, chunk: &Chunk, opcode: &str) {
     }
 }
 
-pub fn diassemble(chunk: &Chunk) -> AnyhowResult<()> {
+pub fn diassemble(chunk: &Chunk) -> Result<()> {
     println!("Disassembling Chunk: {}", chunk.name);
     if chunk.instructions.is_empty() {
-        return Err(anyhow!("Chunk Empty"));
+        return Err(TraceError::EmptyChunk {
+            name: chunk.name.clone(),
+        });
     }
     for idx in 0..chunk.instructions.len() {
         diassemble_instruction(chunk, idx)?;
@@ -22,11 +25,14 @@ pub fn diassemble(chunk: &Chunk) -> AnyhowResult<()> {
     Ok(())
 }
 
-pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> AnyhowResult<()> {
+pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
     let instruction = chunk
         .instructions
         .get(idx)
-        .with_context(|| format!("Instruction not present on chunk in index: {}", idx))?;
+        .ok_or(TraceError::InvalidInstructionPointer {
+            ip: idx,
+            len: chunk.instructions.len(),
+        })?;
     match instruction {
         Instruction::Negate => {
             simple_instruction(idx, chunk, "NEGATE");

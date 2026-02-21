@@ -1,4 +1,6 @@
-use anyhow::Result as AnyhowResult;
+use crate::error::RuntimeError;
+
+type Result<T> = std::result::Result<T, RuntimeError>;
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -6,42 +8,45 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn add(self, right_operand: Value) -> AnyhowResult<Value> {
+    pub fn add(self, right_operand: Value) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Number(left_num + right_num))
             }
         }
     }
-    pub fn subtract(self, right_operand: Value) -> AnyhowResult<Value> {
+    pub fn subtract(self, right_operand: Value) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Number(left_num - right_num))
             }
         }
     }
-    pub fn multiply(self, right_operand: Value) -> AnyhowResult<Value> {
+    pub fn multiply(self, right_operand: Value) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Number(left_num * right_num))
             }
         }
     }
-    pub fn modulo(self, right_operand: Value) -> AnyhowResult<Value> {
+    pub fn modulo(self, right_operand: Value) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Number(left_num % right_num))
             }
         }
     }
-    pub fn divide(self, right_operand: Value) -> AnyhowResult<Value> {
+    pub fn divide(self, right_operand: Value) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
+                if right_num == 0.0 {
+                    return Err(RuntimeError::DivisionByZero);
+                }
                 Ok(Value::Number(left_num / right_num))
             }
         }
     }
-    pub fn negate(&mut self) -> AnyhowResult<()> {
+    pub fn negate(&mut self) -> Result<()> {
         match self {
             Value::Number(num) => {
                 *num = -*num;

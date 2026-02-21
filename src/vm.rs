@@ -1,9 +1,10 @@
-use anyhow::{Context, Result as AnyhowResult, anyhow};
-
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
+use crate::error::InterpretError;
 #[cfg(feature = "trace")]
-use crate::debug::diassemble_instruction;
+use crate::trace::diassemble_instruction;
+
+type Result<T> = std::result::Result<T, InterpretError>;
 
 pub struct VirtualMachine<'a> {
     chunk: Option<&'a Chunk>,
@@ -19,18 +20,18 @@ impl<'a> VirtualMachine<'a> {
             stack: Vec::new(),
         }
     }
-    fn run(&mut self) -> AnyhowResult<()> {
+    fn run(&mut self) -> Result<()> {
         let chunk = *self
             .chunk
             .as_ref()
             .expect("Chunk Instance should've been filled here!");
         loop {
-            let instruction = chunk.instructions.get(self.ip).with_context(|| {
-                format!(
-                    "Couldn't access instruction on chunk at index: {:?}",
-                    self.ip
-                )
-            })?;
+            let instruction = chunk.instructions.get(self.ip).ok_or(
+                InterpretError::InvalidInstructionPointer {
+                    ip: self.ip,
+                    len: chunk.instructions.len(),
+                },
+            )?;
             #[cfg(feature = "trace")]
             println!("Gutting VM's stack");
             #[cfg(feature = "trace")]
@@ -49,15 +50,12 @@ impl<'a> VirtualMachine<'a> {
                     self.stack.push(value.clone());
                 }
                 Instruction::Return => {
-                    let value = self.stack.pop().context("Stack is empty when returning")?;
+                    let value = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
                     println!("{:?}", value);
                     return Ok(());
                 }
                 Instruction::Negate => {
-                    let value = self
-                        .stack
-                        .last_mut()
-                        .context("Stack is empty during negation")?;
+                    let value = self.stack.last_mut().ok_or(InterpretError::EmptyStack)?;
                     value.negate()?;
                 }
                 Instruction::Add => {
@@ -84,25 +82,21 @@ impl<'a> VirtualMachine<'a> {
             self.ip += 1;
         }
     }
-    pub fn interpret(&mut self, chunk: &'a Chunk) -> AnyhowResult<()> {
+    pub fn interpret(&mut self, chunk: &'a Chunk) -> Result<()> {
         self.chunk = Some(chunk);
         self.ip = 0;
         self.run()
     }
-    fn binary_op(&mut self, op: Instruction) -> AnyhowResult<Value> {
-        if self.stack.len() >= 2 {
-            let right_operand = self.stack.pop().context("Stack length checked above!")?;
-            let left_operand = self.stack.pop().context("Stack length checked above")?;
-            match op {
-                Instruction::Add => Ok(left_operand.add(right_operand)?),
-                Instruction::Subtract => Ok(left_operand.subtract(right_operand)?),
-                Instruction::Multiply => Ok(left_operand.multiply(right_operand)?),
-                Instruction::Divide => Ok(left_operand.divide(right_operand)?),
-                Instruction::Modulo => Ok(left_operand.modulo(right_operand)?),
-                _ => Err(anyhow!("Not a binary operation")),
-            }
-        } else {
-            Err(anyhow!("Stack doesn't have operands for binary operation"))
+    fn binary_op(&mut self, op: Instruction) -> Result<Value> {
+        let right_operand = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
+        let left_operand = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
+        match op {
+            Instruction::Add => Ok(left_operand.add(right_operand)?),
+            Instruction::Subtract => Ok(left_operand.subtract(right_operand)?),
+            Instruction::Multiply => Ok(left_operand.multiply(right_operand)?),
+            Instruction::Divide => Ok(left_operand.divide(right_operand)?),
+            Instruction::Modulo => Ok(left_operand.modulo(right_operand)?),
+            _ => Err(InterpretError::InvalidBinaryOp),
         }
     }
 }
