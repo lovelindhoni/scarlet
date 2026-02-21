@@ -16,7 +16,7 @@ fn main() {
     let mut vm = VirtualMachine::new();
     let compliation_result = compile(source);
     if let Ok(chunk) = compliation_result {
-        diassemble(&chunk);
-        vm.interpret(&chunk);
+        diassemble(&chunk).unwrap();
+        vm.interpret(&chunk).unwrap();
     }
 }

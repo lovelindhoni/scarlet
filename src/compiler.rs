@@ -2,7 +2,9 @@ use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::scanner::{Scanner, Token, TokenType};
 
-type ParseFn = fn(&mut Parser);
+use anyhow::{Context, Result as AnyhowResult, anyhow};
+
+type ParseFn = fn(&mut Parser) -> AnyhowResult<()>;
 
 struct ParseRule {
     pub prefix: Option<ParseFn>,
@@ -20,14 +22,14 @@ impl ParseRule {
     }
 }
 
-pub fn compile(source: Vec<u8>) -> Result<Chunk, String> {
+pub fn compile(source: Vec<u8>) -> AnyhowResult<Chunk> {
     let mut parser = Parser::new(source);
-    parser.advance();
-    parser.expression();
-    parser.consume(TokenType::Eof, "Expect end of expression");
-    parser.end_compiler();
+    parser.advance()?;
+    parser.expression()?;
+    parser.consume(TokenType::Eof, "Expect end of expression")?;
+    parser.end_compiler()?;
     if parser.had_error {
-        return Err(format!("Compiliation Failed!"));
+        return Err(anyhow!("Compiliation Failed!"));
     } else {
         Ok(parser.get_chunk())
     }
@@ -93,16 +95,16 @@ impl Parser {
             _ => ParseRule::new(None, None, Precedence::None),
         }
     }
-    fn binary(&mut self) {
+    fn binary(&mut self) -> AnyhowResult<()> {
         let (variant, line) = {
             let prev = self
                 .previous
                 .as_ref()
-                .expect("Binary called without previous token");
+                .context("Previous token not present here")?;
             (prev.variant, prev.line)
         };
         let rule = self.get_rule(variant);
-        self.parse_precedence(rule.precedence.next());
+        self.parse_precedence(rule.precedence.next())?;
         match variant {
             TokenType::Plus => self.chunk.write_instruction(Instruction::Add, line),
             TokenType::Minus => self.chunk.write_instruction(Instruction::Subtract, line),
@@ -113,68 +115,83 @@ impl Parser {
                 // not reachable yet
             }
         }
+        Ok(())
     }
-    fn parse_precedence(&mut self, precedence: Precedence) {
-        self.advance();
+    fn parse_precedence(&mut self, precedence: Precedence) -> AnyhowResult<()> {
+        self.advance()?;
 
         let prev_variant = self.previous.as_ref().expect("No previous token").variant;
         let rule = self.get_rule(prev_variant);
         if let Some(prefix_rule) = rule.prefix {
-            prefix_rule(self);
+            prefix_rule(self)?;
         } else {
-            self.error_at_previous("Expect expression.");
-            return;
+            self.error_at_previous("Expect expression.")?;
+            return Ok(());
         }
 
         while {
             let curr_variant = match self.current.as_ref() {
                 Some(token) => token.variant,
-                None => return,
+                None => return Ok(()),
             };
             precedence <= self.get_rule(curr_variant).precedence
         } {
-            self.advance();
+            self.advance()?;
 
-            let prev_variant = self.previous.as_ref().unwrap().variant;
+            let prev_variant = self
+                .previous
+                .as_ref()
+                .context("Previous token not present here")?
+                .variant;
             let rule = self.get_rule(prev_variant);
 
-            if let Some(infix_rule) = rule.infix {
-                infix_rule(self);
-            } else {
-                self.error_at_previous("Expect infix operator.");
-                return;
-            }
+            let infix_rule = rule
+                .infix
+                .context("Infix rule not present for this token variant here")?;
+            infix_rule(self)?;
+            return Ok(());
         }
+        Ok(())
     }
-    fn number(&mut self) {
-        if let Some(previous_token) = self.previous.as_ref() {
-            let value = str::from_utf8(&previous_token.lexeme)
-                .expect("Previous token lexme is not valid utf8")
-                .parse::<f64>()
-                .expect("This is not a slice that can be parsed to f64");
-            self.chunk
-                .write_constant(Value::Number(value), previous_token.line);
-        } else {
-            eprintln!("Previous token not present here")
-        }
+    fn number(&mut self) -> AnyhowResult<()> {
+        let previous_token = self
+            .previous
+            .as_ref()
+            .context("Previous token not present here")?;
+        let value_str = str::from_utf8(&previous_token.lexeme).with_context(|| {
+            format!(
+                "Previous token lexme is not valid utf8: {:?}",
+                &previous_token.lexeme
+            )
+        })?;
+        let value: f64 = value_str.parse().with_context(|| {
+            format!(
+                "This is not a lexme that can be parsed to f64: {:?}",
+                value_str
+            )
+        })?;
+        self.chunk
+            .write_constant(Value::Number(value), previous_token.line);
+        Ok(())
     }
-    fn grouping(&mut self) {
-        self.expression();
-        self.consume(TokenType::RightParen, "Expect ) after expression");
+    fn grouping(&mut self) -> AnyhowResult<()> {
+        self.expression()?;
+        self.consume(TokenType::RightParen, "Expect ) after expression")?;
+        Ok(())
     }
-    fn unary(&mut self) {
+    fn unary(&mut self) -> AnyhowResult<()> {
         let variant = self
             .previous
             .as_ref()
-            .expect("Binary called without previous token")
+            .context("Previous token not present here")?
             .variant;
         let line = self
             .previous
             .as_ref()
-            .expect("Binary called without previous token")
+            .context("Previous token not present here")?
             .line;
 
-        self.parse_precedence(Precedence::Unary);
+        self.parse_precedence(Precedence::Unary)?;
         match variant {
             TokenType::Minus => {
                 self.chunk.write_instruction(Instruction::Negate, line);
@@ -183,20 +200,24 @@ impl Parser {
                 // not reachable yet
             }
         }
+        Ok(())
     }
-    fn expression(&mut self) {
-        self.parse_precedence(Precedence::Assignment);
+    fn expression(&mut self) -> AnyhowResult<()> {
+        self.parse_precedence(Precedence::Assignment)?;
+        Ok(())
     }
-    fn end_compiler(&mut self) {
-        self.emit_return();
+    fn end_compiler(&mut self) -> AnyhowResult<()> {
+        self.emit_return()?;
+        Ok(())
     }
-    fn emit_return(&mut self) {
-        if let Some(previous_token) = self.previous.as_ref() {
-            self.chunk
-                .write_instruction(Instruction::Return, previous_token.line);
-        } else {
-            eprintln!("Previous token not present here")
-        }
+    fn emit_return(&mut self) -> AnyhowResult<()> {
+        let previous_token = self
+            .previous
+            .as_ref()
+            .context("Previous token not present when emitting return")?;
+        self.chunk
+            .write_instruction(Instruction::Return, previous_token.line);
+        Ok(())
     }
     pub fn new(source: Vec<u8>) -> Self {
         let scanner = Scanner::new(source);
@@ -210,14 +231,15 @@ impl Parser {
             chunk,
         }
     }
-    fn consume(&mut self, token_variant: TokenType, message: &str) {
+    fn consume(&mut self, token_variant: TokenType, message: &str) -> AnyhowResult<()> {
         if let Some(token) = self.current.as_ref() {
             if token_variant == token.variant {
-                self.advance();
+                self.advance()?;
             } else {
-                self.error_at_current(message);
+                self.error_at_current(message)?;
             }
         }
+        Ok(())
     }
     fn error_at(&mut self, token: Token, message: &str) {
         if self.panic_mode {
@@ -237,35 +259,38 @@ impl Parser {
         eprintln!(": {}", message);
         self.had_error = true;
     }
-    fn error_at_previous(&mut self, message: &str) {
-        if let Some(previous) = self.previous.clone() {
-            self.error_at(previous, message);
-        } else {
-            eprintln!("Parser doesn't have previous token stored!");
-        }
+    fn error_at_previous(&mut self, message: &str) -> AnyhowResult<()> {
+        let previous_token = self
+            .previous
+            .clone()
+            .context("Previous token not present when error logging")?;
+        self.error_at(previous_token, message);
+        Ok(())
     }
-    fn error_at_current(&mut self, message: &str) {
-        if let Some(current) = self.previous.clone() {
-            self.error_at(current, message);
-        } else {
-            eprintln!("Parser doesn't have current token stored!");
-        }
+    fn error_at_current(&mut self, message: &str) -> AnyhowResult<()> {
+        let current_token = self
+            .current
+            .clone()
+            .context("Current token not present when error logging")?;
+        self.error_at(current_token, message);
+        Ok(())
     }
-    fn advance(&mut self) {
+    fn advance(&mut self) -> AnyhowResult<()> {
         self.previous = self.current.clone();
         loop {
             self.current = Some(self.scanner.scan_token());
-            let current_token = self.current.as_ref().expect("Should be a token here!");
+            let current_token = self
+                .current
+                .as_ref()
+                .context("Current token not present when advancing")?;
             match current_token.variant {
                 TokenType::UnterminatedString => {
-                    self.error_at_current("Unterminated String");
+                    self.error_at_current("Unterminated String")?;
                 }
                 TokenType::UnexpectedCharacter => {
-                    self.error_at_current("Unexpected Character");
+                    self.error_at_current("Unexpected Character")?;
                 }
-                _ => {
-                    break;
-                }
+                _ => return Ok(()),
             }
         }
     }

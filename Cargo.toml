@@ -5,3 +5,6 @@ edition = "2024"
 
 [features]
 trace = []
+
+[dependencies]
+anyhow = "1.0.102"
