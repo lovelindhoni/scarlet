@@ -85,9 +85,9 @@ impl<'a> VirtualMachine<'a> {
         }
     }
     pub fn interpret(&mut self, chunk: &'a Chunk) -> AnyhowResult<()> {
-        self.chunk = Some(&chunk);
+        self.chunk = Some(chunk);
         self.ip = 0;
-        Ok(self.run()?)
+        self.run()
     }
     fn binary_op(&mut self, op: Instruction) -> AnyhowResult<Value> {
         if self.stack.len() >= 2 {

@@ -29,7 +29,7 @@ pub fn compile(source: Vec<u8>) -> AnyhowResult<Chunk> {
     parser.consume(TokenType::Eof, "Expect end of expression")?;
     parser.end_compiler()?;
     if parser.had_error {
-        return Err(anyhow!("Compiliation Failed!"));
+        Err(anyhow!("Compiliation Failed!"))
     } else {
         Ok(parser.get_chunk())
     }
@@ -149,7 +149,6 @@ impl Parser {
                 .infix
                 .context("Infix rule not present for this token variant here")?;
             infix_rule(self)?;
-            return Ok(());
         }
         Ok(())
     }

@@ -6,7 +6,7 @@ pub struct Scanner {
 }
 
 fn is_digit(byte: &u8) -> bool {
-    (b'0'..=b'9').contains(byte)
+    byte.is_ascii_digit()
 }
 
 fn is_alpha(byte: &u8) -> bool {
@@ -167,18 +167,18 @@ impl Scanner {
                 }
                 self.make_token(TokenType::Number)
             }
-            b'(' => return self.make_token(TokenType::LeftParen),
-            b')' => return self.make_token(TokenType::RightParen),
-            b'{' => return self.make_token(TokenType::LeftBrace),
-            b'}' => return self.make_token(TokenType::RightBrace),
-            b';' => return self.make_token(TokenType::Semicolon),
-            b',' => return self.make_token(TokenType::Comma),
-            b'.' => return self.make_token(TokenType::Dot),
-            b'-' => return self.make_token(TokenType::Minus),
-            b'+' => return self.make_token(TokenType::Plus),
-            b'/' => return self.make_token(TokenType::Slash),
-            b'*' => return self.make_token(TokenType::Star),
-            b'%' => return self.make_token(TokenType::Modulo),
+            b'(' => self.make_token(TokenType::LeftParen),
+            b')' => self.make_token(TokenType::RightParen),
+            b'{' => self.make_token(TokenType::LeftBrace),
+            b'}' => self.make_token(TokenType::RightBrace),
+            b';' => self.make_token(TokenType::Semicolon),
+            b',' => self.make_token(TokenType::Comma),
+            b'.' => self.make_token(TokenType::Dot),
+            b'-' => self.make_token(TokenType::Minus),
+            b'+' => self.make_token(TokenType::Plus),
+            b'/' => self.make_token(TokenType::Slash),
+            b'*' => self.make_token(TokenType::Star),
+            b'%' => self.make_token(TokenType::Modulo),
 
             b'!' => {
                 let variant = if self.match_next(b'=') {
@@ -186,7 +186,7 @@ impl Scanner {
                 } else {
                     TokenType::Bang
                 };
-                return self.make_token(variant);
+                self.make_token(variant)
             }
             b'=' => {
                 let variant = if self.match_next(b'=') {
@@ -194,7 +194,7 @@ impl Scanner {
                 } else {
                     TokenType::Equal
                 };
-                return self.make_token(variant);
+                self.make_token(variant)
             }
             b'<' => {
                 let variant = if self.match_next(b'=') {
@@ -202,7 +202,7 @@ impl Scanner {
                 } else {
                     TokenType::Less
                 };
-                return self.make_token(variant);
+                self.make_token(variant)
             }
             b'>' => {
                 let variant = if self.match_next(b'=') {
@@ -210,7 +210,7 @@ impl Scanner {
                 } else {
                     TokenType::Greater
                 };
-                return self.make_token(variant);
+                self.make_token(variant)
             }
 
             b'"' => {
@@ -221,13 +221,13 @@ impl Scanner {
                     self.advance();
                 }
                 if self.is_at_end() {
-                    return self.make_token(TokenType::UnterminatedString);
+                    self.make_token(TokenType::UnterminatedString);
                 }
                 self.advance(); // closing double quote
                 self.make_token(TokenType::String)
             }
 
-            _ => return self.make_token(TokenType::UnexpectedCharacter),
+            _ => self.make_token(TokenType::UnexpectedCharacter),
         }
     }
 }

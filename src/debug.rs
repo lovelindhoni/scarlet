@@ -29,25 +29,25 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> AnyhowResult<()> {
         .with_context(|| format!("Instruction not present on chunk in index: {}", idx))?;
     match instruction {
         Instruction::Negate => {
-            simple_instruction(idx, &chunk, "NEGATE");
+            simple_instruction(idx, chunk, "NEGATE");
         }
         Instruction::Return => {
-            simple_instruction(idx, &chunk, "RETURN");
+            simple_instruction(idx, chunk, "RETURN");
         }
         Instruction::Add => {
-            simple_instruction(idx, &chunk, "ADD");
+            simple_instruction(idx, chunk, "ADD");
         }
         Instruction::Subtract => {
-            simple_instruction(idx, &chunk, "SUBTRACT");
+            simple_instruction(idx, chunk, "SUBTRACT");
         }
         Instruction::Multiply => {
-            simple_instruction(idx, &chunk, "MULTIPLY");
+            simple_instruction(idx, chunk, "MULTIPLY");
         }
         Instruction::Divide => {
-            simple_instruction(idx, &chunk, "DIVIDE");
+            simple_instruction(idx, chunk, "DIVIDE");
         }
         Instruction::Modulo => {
-            simple_instruction(idx, &chunk, "MODULO");
+            simple_instruction(idx, chunk, "MODULO");
         }
 
         Instruction::Constant(pos) => {
