@@ -225,7 +225,7 @@ impl Scanner {
                 }
                 if self.is_at_end() {
                     return Err(ScanError::UnterminatedString {
-                        message: "Unterminated String".to_owned(),
+                        message: String::from("Unterminated String"),
                         line: self.line,
                         lexeme: self.source[self.start..self.current].to_owned(),
                     });
@@ -235,7 +235,7 @@ impl Scanner {
             }
 
             _ => Err(ScanError::UnexpectedCharacter {
-                message: "Unexpected Character".to_owned(),
+                message: String::from("Unexpected Character"),
                 line: self.line,
                 lexeme: self.source[self.start..self.current].to_owned(),
             }),

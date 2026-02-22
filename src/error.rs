@@ -13,10 +13,15 @@ pub enum TraceError {
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
-    // #[error("Type error: expected number, found {found}")]
-    // TypeError { found: String },
-    #[error("Division by zero")]
-    DivisionByZero,
+    #[error("Type error: {message}\n[line {line}] in script")]
+    TypeError { line: u64, message: String },
+
+    #[error("Division By Zero: {left_num}/{right_num}\n[line {line}] in script")]
+    DivisionByZero {
+        line: u64,
+        left_num: f64,
+        right_num: f64,
+    },
 }
 
 #[derive(Debug, Error)]

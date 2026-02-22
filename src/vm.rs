@@ -49,6 +49,32 @@ impl<'a> VirtualMachine<'a> {
                     let value = &chunk.values[*pos];
                     self.stack.push(value.clone());
                 }
+                Instruction::True => {
+                    self.stack.push(Value::Boolean(true));
+                }
+                Instruction::False => {
+                    self.stack.push(Value::Boolean(false));
+                }
+                Instruction::Nil => {
+                    self.stack.push(Value::Nil);
+                }
+                Instruction::Not => {
+                    let value = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
+                    let notted_value = value.not(chunk.get_line(self.ip))?;
+                    self.stack.push(notted_value);
+                }
+                Instruction::Equal => {
+                    let result = self.binary_op(Instruction::Equal, chunk.get_line(self.ip))?;
+                    self.stack.push(result);
+                }
+                Instruction::Greater => {
+                    let result = self.binary_op(Instruction::Greater, chunk.get_line(self.ip))?;
+                    self.stack.push(result);
+                }
+                Instruction::Less => {
+                    let result = self.binary_op(Instruction::Less, chunk.get_line(self.ip))?;
+                    self.stack.push(result);
+                }
                 Instruction::Return => {
                     let value = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
                     println!("{:?}", value);
@@ -56,26 +82,26 @@ impl<'a> VirtualMachine<'a> {
                 }
                 Instruction::Negate => {
                     let value = self.stack.last_mut().ok_or(InterpretError::EmptyStack)?;
-                    value.negate()?;
+                    value.negate(chunk.get_line(self.ip))?;
                 }
                 Instruction::Add => {
-                    let result = self.binary_op(Instruction::Add)?;
+                    let result = self.binary_op(Instruction::Add, chunk.get_line(self.ip))?;
                     self.stack.push(result);
                 }
                 Instruction::Subtract => {
-                    let result = self.binary_op(Instruction::Subtract)?;
+                    let result = self.binary_op(Instruction::Subtract, chunk.get_line(self.ip))?;
                     self.stack.push(result);
                 }
                 Instruction::Multiply => {
-                    let result = self.binary_op(Instruction::Multiply)?;
+                    let result = self.binary_op(Instruction::Multiply, chunk.get_line(self.ip))?;
                     self.stack.push(result);
                 }
                 Instruction::Divide => {
-                    let result = self.binary_op(Instruction::Divide)?;
+                    let result = self.binary_op(Instruction::Divide, chunk.get_line(self.ip))?;
                     self.stack.push(result);
                 }
                 Instruction::Modulo => {
-                    let result = self.binary_op(Instruction::Modulo)?;
+                    let result = self.binary_op(Instruction::Modulo, chunk.get_line(self.ip))?;
                     self.stack.push(result);
                 }
             }
@@ -87,15 +113,18 @@ impl<'a> VirtualMachine<'a> {
         self.ip = 0;
         self.run()
     }
-    fn binary_op(&mut self, op: Instruction) -> Result<Value> {
+    fn binary_op(&mut self, op: Instruction, line: u64) -> Result<Value> {
         let right_operand = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
         let left_operand = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
         match op {
-            Instruction::Add => Ok(left_operand.add(right_operand)?),
-            Instruction::Subtract => Ok(left_operand.subtract(right_operand)?),
-            Instruction::Multiply => Ok(left_operand.multiply(right_operand)?),
-            Instruction::Divide => Ok(left_operand.divide(right_operand)?),
-            Instruction::Modulo => Ok(left_operand.modulo(right_operand)?),
+            Instruction::Add => Ok(left_operand.add(right_operand, line)?),
+            Instruction::Subtract => Ok(left_operand.subtract(right_operand, line)?),
+            Instruction::Multiply => Ok(left_operand.multiply(right_operand, line)?),
+            Instruction::Divide => Ok(left_operand.divide(right_operand, line)?),
+            Instruction::Modulo => Ok(left_operand.modulo(right_operand, line)?),
+            Instruction::Equal => Ok(left_operand.equal(right_operand)?),
+            Instruction::Greater => Ok(left_operand.greater(right_operand, line)?),
+            Instruction::Less => Ok(left_operand.less(right_operand, line)?),
             _ => Err(InterpretError::InvalidBinaryOp),
         }
     }

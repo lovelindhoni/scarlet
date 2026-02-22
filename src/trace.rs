@@ -55,7 +55,27 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
         Instruction::Modulo => {
             simple_instruction(idx, chunk, "MODULO");
         }
-
+        Instruction::True => {
+            simple_instruction(idx, chunk, "TRUE");
+        }
+        Instruction::False => {
+            simple_instruction(idx, chunk, "FALSE");
+        }
+        Instruction::Nil => {
+            simple_instruction(idx, chunk, "NIL");
+        }
+        Instruction::Not => {
+            simple_instruction(idx, chunk, "NOT");
+        }
+        Instruction::Equal => {
+            simple_instruction(idx, chunk, "EQUAL");
+        }
+        Instruction::Greater => {
+            simple_instruction(idx, chunk, "GREATER");
+        }
+        Instruction::Less => {
+            simple_instruction(idx, chunk, "LESS");
+        }
         Instruction::Constant(pos) => {
             if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
                 println!("{} | CONSTANT {}'{:?}'", idx, pos, chunk.values[*pos]);

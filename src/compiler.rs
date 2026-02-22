@@ -80,14 +80,56 @@ impl Parser {
             TokenType::Minus => {
                 ParseRule::new(Some(Parser::unary), Some(Parser::binary), Precedence::Term)
             }
+            TokenType::Bang => ParseRule::new(Some(Parser::unary), None, Precedence::None),
             TokenType::Plus => ParseRule::new(None, Some(Parser::binary), Precedence::Term),
             TokenType::Slash => ParseRule::new(None, Some(Parser::binary), Precedence::Factor),
             TokenType::Star => ParseRule::new(None, Some(Parser::binary), Precedence::Factor),
             TokenType::Modulo => ParseRule::new(None, Some(Parser::binary), Precedence::Factor),
             TokenType::Number => ParseRule::new(Some(Parser::number), None, Precedence::None),
+            TokenType::True => ParseRule::new(Some(Parser::literal), None, Precedence::None),
+            TokenType::False => ParseRule::new(Some(Parser::literal), None, Precedence::None),
+            TokenType::Nil => ParseRule::new(Some(Parser::literal), None, Precedence::None),
+
+            TokenType::BangEqual => {
+                ParseRule::new(None, Some(Parser::binary), Precedence::Equality)
+            }
+            TokenType::EqualEqual => {
+                ParseRule::new(None, Some(Parser::binary), Precedence::Equality)
+            }
+            TokenType::Greater => {
+                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison)
+            }
+            TokenType::GreaterEqual => {
+                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison)
+            }
+            TokenType::Less => ParseRule::new(None, Some(Parser::binary), Precedence::Comparison),
+            TokenType::LessEqual => {
+                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison)
+            }
 
             _ => ParseRule::new(None, None, Precedence::None),
         }
+    }
+    fn literal(&mut self) -> Result<()> {
+        let previous_token = self
+            .previous
+            .as_ref()
+            .ok_or(CompileError::PreviousTokenAbsence)?;
+        match previous_token.variant {
+            TokenType::True => self
+                .chunk
+                .write_instruction(Instruction::True, previous_token.line),
+            TokenType::False => self
+                .chunk
+                .write_instruction(Instruction::False, previous_token.line),
+            TokenType::Nil => self
+                .chunk
+                .write_instruction(Instruction::Nil, previous_token.line),
+            _ => {
+                // unreachable
+            }
+        }
+        Ok(())
     }
     fn binary(&mut self) -> Result<()> {
         let (variant, line) = {
@@ -105,6 +147,22 @@ impl Parser {
             TokenType::Star => self.chunk.write_instruction(Instruction::Multiply, line),
             TokenType::Slash => self.chunk.write_instruction(Instruction::Divide, line),
             TokenType::Modulo => self.chunk.write_instruction(Instruction::Modulo, line),
+            TokenType::BangEqual => {
+                self.chunk.write_instruction(Instruction::Equal, line);
+                self.chunk.write_instruction(Instruction::Not, line);
+            }
+            TokenType::EqualEqual => self.chunk.write_instruction(Instruction::Equal, line),
+            TokenType::Greater => self.chunk.write_instruction(Instruction::Greater, line),
+            TokenType::GreaterEqual => {
+                self.chunk.write_instruction(Instruction::Less, line);
+                self.chunk.write_instruction(Instruction::Not, line);
+            }
+            TokenType::Less => self.chunk.write_instruction(Instruction::Less, line),
+            TokenType::LessEqual => {
+                self.chunk.write_instruction(Instruction::Greater, line);
+                self.chunk.write_instruction(Instruction::Not, line);
+            }
+
             _ => {
                 // not reachable yet
             }
@@ -188,6 +246,9 @@ impl Parser {
         match variant {
             TokenType::Minus => {
                 self.chunk.write_instruction(Instruction::Negate, line);
+            }
+            TokenType::Bang => {
+                self.chunk.write_instruction(Instruction::Not, line);
             }
             _ => {
                 // not reachable yet
