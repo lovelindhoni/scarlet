@@ -1,24 +1,26 @@
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::CompileError;
+use crate::heap::{Heap, Object};
 use crate::scanner::{Scanner, Token, TokenType};
 
 type Result<T> = std::result::Result<T, CompileError>;
 
-pub fn compile(source: Vec<u8>) -> Result<Chunk> {
-    let mut parser = Parser::new(source);
+pub fn compile(source: Vec<u8>, chunk: &mut Chunk, heap: &mut Heap) -> Result<()> {
+    let mut parser = Parser::new(source, chunk, heap);
     parser.advance()?;
     parser.expression()?;
     parser.consume(TokenType::Eof, "Expect end of expression")?;
     parser.end_compiler()?;
-    Ok(parser.get_chunk())
+    Ok(())
 }
 
-struct Parser {
+struct Parser<'a> {
     previous: Option<Token>,
     current: Option<Token>,
     scanner: Scanner,
-    chunk: Chunk,
+    chunk: &'a mut Chunk,
+    heap: &'a mut Heap,
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -56,7 +58,7 @@ impl Precedence {
     }
 }
 
-impl Parser {
+impl<'a> Parser<'a> {
     fn get_rule_precedence(&self, token_variant: TokenType) -> Precedence {
         match token_variant {
             TokenType::Minus | TokenType::Plus => Precedence::Term,
@@ -76,15 +78,16 @@ impl Parser {
         match token_variant {
             TokenType::LeftParen => self.grouping(),
             TokenType::Number => self.number(),
+            TokenType::String => self.string(),
             TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::True | TokenType::False | TokenType::Nil => self.literal(),
 
-            _ => Err(CompileError::PrefixParserAbsence {
+            _ => Err(CompileError::MissingPrefixParser {
                 message: "Expect expression".to_owned(),
                 token: self
                     .current
                     .as_ref()
-                    .ok_or(CompileError::CurrentTokenAbsence)?
+                    .ok_or(CompileError::MissingCurrentToken)?
                     .clone(),
             }),
         }
@@ -108,18 +111,36 @@ impl Parser {
                 let prev_variant = self
                     .previous
                     .as_ref()
-                    .ok_or(CompileError::PreviousTokenAbsence)?
+                    .ok_or(CompileError::MissingPreviousToken)?
                     .variant;
 
-                Err(CompileError::InfixParserAbsence(prev_variant))
+                Err(CompileError::MissingInfixParser(prev_variant))
             }
         }
+    }
+    fn string(&mut self) -> Result<()> {
+        let previous_token = self
+            .previous
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?;
+
+        let lexeme = &previous_token.lexeme;
+        let trimmed_lexeme = &lexeme[1..lexeme.len() - 1];
+        let string_value = String::from_utf8_lossy(trimmed_lexeme).to_string();
+        let key = self.heap.arena.insert(Object::String {
+            value: string_value,
+        });
+
+        self.chunk
+            .write_constant(Value::Object(key), previous_token.line);
+
+        Ok(())
     }
     fn literal(&mut self) -> Result<()> {
         let previous_token = self
             .previous
             .as_ref()
-            .ok_or(CompileError::PreviousTokenAbsence)?;
+            .ok_or(CompileError::MissingPreviousToken)?;
         match previous_token.variant {
             TokenType::True => self
                 .chunk
@@ -141,7 +162,7 @@ impl Parser {
             let prev = self
                 .previous
                 .as_ref()
-                .ok_or(CompileError::PreviousTokenAbsence)?;
+                .ok_or(CompileError::MissingPreviousToken)?;
             (prev.variant, prev.line)
         };
         let rule = self.get_rule_precedence(variant);
@@ -184,7 +205,7 @@ impl Parser {
             let curr_variant = self
                 .current
                 .as_ref()
-                .ok_or(CompileError::CurrentTokenAbsence)?
+                .ok_or(CompileError::MissingCurrentToken)?
                 .variant;
             precedence <= self.get_rule_precedence(curr_variant)
         } {
@@ -193,7 +214,7 @@ impl Parser {
             let prev_variant = self
                 .previous
                 .as_ref()
-                .ok_or(CompileError::PreviousTokenAbsence)?
+                .ok_or(CompileError::MissingPreviousToken)?
                 .variant;
             self.execute_infix_parser(prev_variant)?;
         }
@@ -203,7 +224,7 @@ impl Parser {
         let previous_token = self
             .previous
             .as_ref()
-            .ok_or(CompileError::PreviousTokenAbsence)?;
+            .ok_or(CompileError::MissingPreviousToken)?;
         let value_str = str::from_utf8(&previous_token.lexeme)
             .map_err(|e| CompileError::InvalidUtf8 { source: e })?;
         let value: f64 = value_str.parse().map_err(|e| CompileError::LiteralParse {
@@ -226,7 +247,7 @@ impl Parser {
             let prev = self
                 .previous
                 .as_ref()
-                .ok_or(CompileError::PreviousTokenAbsence)?;
+                .ok_or(CompileError::MissingPreviousToken)?;
             (prev.variant, prev.line)
         };
 
@@ -256,26 +277,26 @@ impl Parser {
         let previous_token = self
             .previous
             .as_ref()
-            .ok_or(CompileError::PreviousTokenAbsence)?;
+            .ok_or(CompileError::MissingPreviousToken)?;
         self.chunk
             .write_instruction(Instruction::Return, previous_token.line);
         Ok(())
     }
-    pub fn new(source: Vec<u8>) -> Self {
+    pub fn new(source: Vec<u8>, chunk: &'a mut Chunk, heap: &'a mut Heap) -> Self {
         let scanner = Scanner::new(source);
-        let chunk = Chunk::new("Master");
         Self {
             previous: None,
             current: None,
             scanner,
             chunk,
+            heap,
         }
     }
     fn consume(&mut self, token_variant: TokenType, message: &str) -> Result<()> {
         let token = self
             .current
             .as_ref()
-            .ok_or(CompileError::CurrentTokenAbsence)?;
+            .ok_or(CompileError::MissingCurrentToken)?;
         if token_variant == token.variant {
             self.advance()?;
         } else {
@@ -290,8 +311,5 @@ impl Parser {
         self.previous = self.current.clone();
         self.current = Some(self.scanner.scan_token()?);
         Ok(())
-    }
-    pub fn get_chunk(self) -> Chunk {
-        self.chunk
     }
 }

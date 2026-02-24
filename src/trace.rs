@@ -77,6 +77,7 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
             simple_instruction(idx, chunk, "LESS");
         }
         Instruction::Constant(pos) => {
+            // TODO: need to account for objects properly here
             if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
                 println!("{} | CONSTANT {}'{:?}'", idx, pos, chunk.values[*pos]);
             } else {

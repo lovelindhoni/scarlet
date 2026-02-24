@@ -1,6 +1,7 @@
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
-use crate::error::InterpretError;
+use crate::error::{InterpretError, RuntimeError};
+use crate::heap::Heap;
 #[cfg(feature = "trace")]
 use crate::trace::diassemble_instruction;
 
@@ -10,6 +11,7 @@ pub struct VirtualMachine<'a> {
     chunk: Option<&'a Chunk>,
     ip: usize, // The program counter, denotes the next instruction to be executed
     stack: Vec<Value>,
+    heap: Option<&'a mut Heap>,
 }
 
 impl<'a> VirtualMachine<'a> {
@@ -18,13 +20,11 @@ impl<'a> VirtualMachine<'a> {
             chunk: None,
             ip: 0,
             stack: Vec::new(),
+            heap: None,
         }
     }
     fn run(&mut self) -> Result<()> {
-        let chunk = *self
-            .chunk
-            .as_ref()
-            .expect("Chunk Instance should've been filled here!");
+        let chunk = *self.chunk.as_ref().ok_or(InterpretError::MissingChunk)?;
         loop {
             let instruction = chunk.instructions.get(self.ip).ok_or(
                 InterpretError::InvalidInstructionPointer {
@@ -77,7 +77,13 @@ impl<'a> VirtualMachine<'a> {
                 }
                 Instruction::Return => {
                     let value = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
-                    println!("{:?}", value);
+                    if let Value::Object(key) = value {
+                        let heap = self.heap.as_ref().ok_or(InterpretError::MissingHeap)?;
+                        let object = heap.arena.get(key).ok_or(RuntimeError::ExpiredArenaKey)?;
+                        println!("{:?}", object);
+                    } else {
+                        println!("{:?}", value);
+                    }
                     return Ok(());
                 }
                 Instruction::Negate => {
@@ -108,8 +114,9 @@ impl<'a> VirtualMachine<'a> {
             self.ip += 1;
         }
     }
-    pub fn interpret(&mut self, chunk: &'a Chunk) -> Result<()> {
+    pub fn interpret(&mut self, chunk: &'a Chunk, heap: &'a mut Heap) -> Result<()> {
         self.chunk = Some(chunk);
+        self.heap = Some(heap);
         self.ip = 0;
         self.run()
     }
@@ -117,12 +124,18 @@ impl<'a> VirtualMachine<'a> {
         let right_operand = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
         let left_operand = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
         match op {
-            Instruction::Add => Ok(left_operand.add(right_operand, line)?),
+            Instruction::Add => {
+                let heap = self.heap.as_mut().ok_or(InterpretError::MissingHeap)?;
+                Ok(left_operand.add(right_operand, line, heap)?)
+            }
+            Instruction::Equal => {
+                let heap = self.heap.as_ref().ok_or(InterpretError::MissingHeap)?;
+                Ok(left_operand.equal(right_operand, heap)?)
+            }
             Instruction::Subtract => Ok(left_operand.subtract(right_operand, line)?),
             Instruction::Multiply => Ok(left_operand.multiply(right_operand, line)?),
             Instruction::Divide => Ok(left_operand.divide(right_operand, line)?),
             Instruction::Modulo => Ok(left_operand.modulo(right_operand, line)?),
-            Instruction::Equal => Ok(left_operand.equal(right_operand)?),
             Instruction::Greater => Ok(left_operand.greater(right_operand, line)?),
             Instruction::Less => Ok(left_operand.less(right_operand, line)?),
             _ => Err(InterpretError::InvalidBinaryOp),

@@ -1,4 +1,8 @@
-use crate::error::RuntimeError;
+use crate::{
+    error::RuntimeError,
+    heap::{Heap, Object},
+};
+use slotmap::DefaultKey;
 
 type Result<T> = std::result::Result<T, RuntimeError>;
 
@@ -7,17 +11,39 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     Nil,
+    Object(DefaultKey),
 }
 
 impl Value {
-    pub fn add(self, right_operand: Value, line: u64) -> Result<Value> {
+    pub fn add(self, right_operand: Value, line: u64, heap: &mut Heap) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Number(left_num + right_num))
             }
+            (Value::Object(left_key), Value::Object(right_key)) => {
+                let left_object = heap
+                    .arena
+                    .get(left_key)
+                    .ok_or(RuntimeError::ExpiredArenaKey)?;
+                let right_object = heap
+                    .arena
+                    .get(right_key)
+                    .ok_or(RuntimeError::ExpiredArenaKey)?;
+                match (left_object, right_object) {
+                    (Object::String { value: left }, Object::String { value: right }) => {
+                        let concantated_string = left.to_owned() + right;
+                        let key = heap.arena.insert(Object::String {
+                            value: concantated_string,
+                        });
+                        Ok(Value::Object(key))
+                    }
+                }
+            }
             _ => Err(RuntimeError::TypeError {
                 line,
-                message: String::from("The operands need to be numbers for division"),
+                message: String::from(
+                    "Both of the operands need to be either numbers or strings for addition",
+                ),
             }),
         }
     }
@@ -28,7 +54,7 @@ impl Value {
             }
             _ => Err(RuntimeError::TypeError {
                 line,
-                message: String::from("The operands need to be numbers for division"),
+                message: String::from("The operands need to be numbers for subtraction"),
             }),
         }
     }
@@ -39,7 +65,7 @@ impl Value {
             }
             _ => Err(RuntimeError::TypeError {
                 line,
-                message: String::from("The operands need to be numbers for division"),
+                message: String::from("The operands need to be numbers for multiplication"),
             }),
         }
     }
@@ -50,7 +76,7 @@ impl Value {
             }
             _ => Err(RuntimeError::TypeError {
                 line,
-                message: String::from("The operands need to be numbers for division"),
+                message: String::from("The operands need to be numbers for modulus"),
             }),
         }
     }
@@ -79,7 +105,7 @@ impl Value {
         }
     }
 
-    pub fn equal(self, right_operand: Value) -> Result<Value> {
+    pub fn equal(self, right_operand: Value, heap: &Heap) -> Result<Value> {
         Ok(match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Value::Boolean(left_num == right_num)
@@ -88,6 +114,21 @@ impl Value {
                 Value::Boolean(left_bool == right_bool)
             }
             (Value::Nil, Value::Nil) => Value::Boolean(true),
+            (Value::Object(left_key), Value::Object(right_key)) => {
+                let left_object = heap
+                    .arena
+                    .get(left_key)
+                    .ok_or(RuntimeError::ExpiredArenaKey)?;
+                let right_object = heap
+                    .arena
+                    .get(right_key)
+                    .ok_or(RuntimeError::ExpiredArenaKey)?;
+                match (left_object, right_object) {
+                    (Object::String { value: left }, Object::String { value: right }) => {
+                        Value::Boolean(left == right)
+                    }
+                }
+            }
             _ => Value::Boolean(false),
         })
     }
@@ -126,12 +167,8 @@ impl Value {
                 *num = -*num;
                 Ok(())
             }
-            Value::Boolean(_) => Err(RuntimeError::TypeError {
-                message: String::from("Can't negate boolean value"),
-                line,
-            }),
-            Value::Nil => Err(RuntimeError::TypeError {
-                message: String::from("Can't negate nil value"),
+            _ => Err(RuntimeError::TypeError {
+                message: String::from("Only numbers can be negated"),
                 line,
             }),
         }

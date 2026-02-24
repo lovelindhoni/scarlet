@@ -16,6 +16,10 @@ pub enum RuntimeError {
     #[error("Type error: {message}\n[line {line}] in script")]
     TypeError { line: u64, message: String },
 
+    // TODO: maybe do better debug msg, such as to include line, and the value type?
+    #[error("Internal: Expired arena key")]
+    ExpiredArenaKey,
+
     #[error("Division By Zero: {left_num}/{right_num}\n[line {line}] in script")]
     DivisionByZero {
         line: u64,
@@ -43,14 +47,14 @@ pub enum ScanError {
 
 #[derive(Debug, Error)]
 pub enum CompileError {
-    #[error("Scanner failure on {0}")]
+    #[error("Syntax Error on {0}")]
     Scan(#[from] ScanError),
 
-    #[error("Internal: Current token is absent when parsing")]
-    CurrentTokenAbsence,
+    #[error("Internal: Missing current token when parsing")]
+    MissingCurrentToken,
 
-    #[error("Internal: Previous token is absent when parsing")]
-    PreviousTokenAbsence,
+    #[error("Internal: Missing previous token when parsing")]
+    MissingPreviousToken,
 
     #[error("{msg}", msg = compile_error_helper(.message, .token))]
     UnexpectedToken { message: String, token: Token },
@@ -66,10 +70,10 @@ pub enum CompileError {
     },
 
     #[error("{msg}", msg = compile_error_helper(.message, .token))]
-    PrefixParserAbsence { message: String, token: Token },
+    MissingPrefixParser { message: String, token: Token },
 
-    #[error("Internal: Infix rule not present for the token variant {0}")]
-    InfixParserAbsence(TokenType),
+    #[error("Internal: Missing infix rule for the token variant {0}")]
+    MissingInfixParser(TokenType),
 }
 
 #[derive(Debug, Error)]
@@ -82,6 +86,12 @@ pub enum InterpretError {
 
     #[error("RuntimeError: {0}")]
     Runtime(#[from] RuntimeError),
+
+    #[error("Internal: Chunk instance not initialized")]
+    MissingChunk,
+
+    #[error("Internal: Heap instance not initialized")]
+    MissingHeap,
 
     #[error("Instruction pointer {ip} out of bounds (len = {len})")]
     InvalidInstructionPointer { ip: usize, len: usize },
