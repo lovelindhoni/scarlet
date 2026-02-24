@@ -4,23 +4,6 @@ use crate::error::CompileError;
 use crate::scanner::{Scanner, Token, TokenType};
 
 type Result<T> = std::result::Result<T, CompileError>;
-type ParseFn = fn(&mut Parser) -> Result<()>;
-
-struct ParseRule {
-    pub prefix: Option<ParseFn>,
-    pub infix: Option<ParseFn>,
-    pub precedence: Precedence,
-}
-
-impl ParseRule {
-    pub fn new(prefix: Option<ParseFn>, infix: Option<ParseFn>, precedence: Precedence) -> Self {
-        Self {
-            prefix,
-            infix,
-            precedence,
-        }
-    }
-}
 
 pub fn compile(source: Vec<u8>) -> Result<Chunk> {
     let mut parser = Parser::new(source);
@@ -74,40 +57,62 @@ impl Precedence {
 }
 
 impl Parser {
-    fn get_rule(&self, token_variant: TokenType) -> ParseRule {
+    fn get_rule_precedence(&self, token_variant: TokenType) -> Precedence {
         match token_variant {
-            TokenType::LeftParen => ParseRule::new(Some(Parser::grouping), None, Precedence::None),
-            TokenType::Minus => {
-                ParseRule::new(Some(Parser::unary), Some(Parser::binary), Precedence::Term)
-            }
-            TokenType::Bang => ParseRule::new(Some(Parser::unary), None, Precedence::None),
-            TokenType::Plus => ParseRule::new(None, Some(Parser::binary), Precedence::Term),
-            TokenType::Slash => ParseRule::new(None, Some(Parser::binary), Precedence::Factor),
-            TokenType::Star => ParseRule::new(None, Some(Parser::binary), Precedence::Factor),
-            TokenType::Modulo => ParseRule::new(None, Some(Parser::binary), Precedence::Factor),
-            TokenType::Number => ParseRule::new(Some(Parser::number), None, Precedence::None),
-            TokenType::True => ParseRule::new(Some(Parser::literal), None, Precedence::None),
-            TokenType::False => ParseRule::new(Some(Parser::literal), None, Precedence::None),
-            TokenType::Nil => ParseRule::new(Some(Parser::literal), None, Precedence::None),
+            TokenType::Minus | TokenType::Plus => Precedence::Term,
+            TokenType::Slash | TokenType::Star | TokenType::Modulo => Precedence::Factor,
 
-            TokenType::BangEqual => {
-                ParseRule::new(None, Some(Parser::binary), Precedence::Equality)
-            }
-            TokenType::EqualEqual => {
-                ParseRule::new(None, Some(Parser::binary), Precedence::Equality)
-            }
-            TokenType::Greater => {
-                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison)
-            }
-            TokenType::GreaterEqual => {
-                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison)
-            }
-            TokenType::Less => ParseRule::new(None, Some(Parser::binary), Precedence::Comparison),
-            TokenType::LessEqual => {
-                ParseRule::new(None, Some(Parser::binary), Precedence::Comparison)
-            }
+            TokenType::BangEqual | TokenType::EqualEqual => Precedence::Equality,
 
-            _ => ParseRule::new(None, None, Precedence::None),
+            TokenType::Greater
+            | TokenType::GreaterEqual
+            | TokenType::Less
+            | TokenType::LessEqual => Precedence::Comparison,
+
+            _ => Precedence::None,
+        }
+    }
+    fn execute_prefix_parser(&mut self, token_variant: TokenType) -> Result<()> {
+        match token_variant {
+            TokenType::LeftParen => self.grouping(),
+            TokenType::Number => self.number(),
+            TokenType::Minus | TokenType::Bang => self.unary(),
+            TokenType::True | TokenType::False | TokenType::Nil => self.literal(),
+
+            _ => Err(CompileError::PrefixParserAbsence {
+                message: "Expect expression".to_owned(),
+                token: self
+                    .current
+                    .as_ref()
+                    .ok_or(CompileError::CurrentTokenAbsence)?
+                    .clone(),
+            }),
+        }
+    }
+
+    fn execute_infix_parser(&mut self, token_variant: TokenType) -> Result<()> {
+        match token_variant {
+            TokenType::Minus
+            | TokenType::Plus
+            | TokenType::Slash
+            | TokenType::Star
+            | TokenType::Modulo
+            | TokenType::BangEqual
+            | TokenType::EqualEqual
+            | TokenType::Greater
+            | TokenType::GreaterEqual
+            | TokenType::Less
+            | TokenType::LessEqual => self.binary(),
+
+            _ => {
+                let prev_variant = self
+                    .previous
+                    .as_ref()
+                    .ok_or(CompileError::PreviousTokenAbsence)?
+                    .variant;
+
+                Err(CompileError::InfixParserAbsence(prev_variant))
+            }
         }
     }
     fn literal(&mut self) -> Result<()> {
@@ -139,8 +144,8 @@ impl Parser {
                 .ok_or(CompileError::PreviousTokenAbsence)?;
             (prev.variant, prev.line)
         };
-        let rule = self.get_rule(variant);
-        self.parse_precedence(rule.precedence.next())?;
+        let rule = self.get_rule_precedence(variant);
+        self.parse_precedence(rule.next())?;
         match variant {
             TokenType::Plus => self.chunk.write_instruction(Instruction::Add, line),
             TokenType::Minus => self.chunk.write_instruction(Instruction::Subtract, line),
@@ -173,19 +178,7 @@ impl Parser {
         self.advance()?;
 
         let prev_variant = self.previous.as_ref().expect("No previous token").variant;
-        let rule = self.get_rule(prev_variant);
-        if let Some(prefix_rule) = rule.prefix {
-            prefix_rule(self)?;
-        } else {
-            return Err(CompileError::PrefixParserAbsence {
-                message: "Expect expression".to_owned(),
-                token: self
-                    .current
-                    .as_ref()
-                    .ok_or(CompileError::CurrentTokenAbsence)?
-                    .clone(),
-            });
-        }
+        self.execute_prefix_parser(prev_variant)?;
 
         while {
             let curr_variant = self
@@ -193,7 +186,7 @@ impl Parser {
                 .as_ref()
                 .ok_or(CompileError::CurrentTokenAbsence)?
                 .variant;
-            precedence <= self.get_rule(curr_variant).precedence
+            precedence <= self.get_rule_precedence(curr_variant)
         } {
             self.advance()?;
 
@@ -202,12 +195,7 @@ impl Parser {
                 .as_ref()
                 .ok_or(CompileError::PreviousTokenAbsence)?
                 .variant;
-            let rule = self.get_rule(prev_variant);
-
-            let infix_rule = rule
-                .infix
-                .ok_or(CompileError::InfixParserAbsence(prev_variant))?;
-            infix_rule(self)?;
+            self.execute_infix_parser(prev_variant)?;
         }
         Ok(())
     }
