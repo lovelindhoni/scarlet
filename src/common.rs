@@ -1,5 +1,5 @@
 use crate::{
-    error::RuntimeError,
+    error::{HeapError, RuntimeError},
     heap::{Heap, Object},
 };
 use slotmap::DefaultKey;
@@ -21,20 +21,39 @@ impl Value {
                 Ok(Value::Number(left_num + right_num))
             }
             (Value::Object(left_key), Value::Object(right_key)) => {
-                let left_object = heap
-                    .arena
-                    .get(left_key)
-                    .ok_or(RuntimeError::ExpiredArenaKey)?;
+                let left_object = heap.arena.get(left_key).ok_or(HeapError::ExpiredArenaKey)?;
                 let right_object = heap
                     .arena
                     .get(right_key)
-                    .ok_or(RuntimeError::ExpiredArenaKey)?;
+                    .ok_or(HeapError::ExpiredArenaKey)?;
                 match (left_object, right_object) {
                     (Object::String { value: left }, Object::String { value: right }) => {
                         let concantated_string = left.to_owned() + right;
-                        let key = heap.arena.insert(Object::String {
-                            value: concantated_string,
-                        });
+                        let key = if heap.intern_table.contains_key(&concantated_string) {
+                            let interned_key = heap.intern_table[&concantated_string];
+                            let object = heap
+                                .arena
+                                .get(interned_key)
+                                .ok_or(HeapError::ExpiredArenaKey)?;
+                            match object {
+                                Object::String { value } => {
+                                    if value != &concantated_string {
+                                        return Err(HeapError::InvalidInternedKey {
+                                            expected: concantated_string,
+                                            found: value.to_owned(),
+                                        }
+                                        .into());
+                                    }
+                                }
+                            }
+                            interned_key
+                        } else {
+                            let interned_key = heap.arena.insert(Object::String {
+                                value: concantated_string.clone(),
+                            });
+                            heap.intern_table.insert(concantated_string, interned_key);
+                            interned_key
+                        };
                         Ok(Value::Object(key))
                     }
                 }
@@ -105,7 +124,7 @@ impl Value {
         }
     }
 
-    pub fn equal(self, right_operand: Value, heap: &Heap) -> Result<Value> {
+    pub fn equal(self, right_operand: Value) -> Result<Value> {
         Ok(match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Value::Boolean(left_num == right_num)
@@ -115,19 +134,7 @@ impl Value {
             }
             (Value::Nil, Value::Nil) => Value::Boolean(true),
             (Value::Object(left_key), Value::Object(right_key)) => {
-                let left_object = heap
-                    .arena
-                    .get(left_key)
-                    .ok_or(RuntimeError::ExpiredArenaKey)?;
-                let right_object = heap
-                    .arena
-                    .get(right_key)
-                    .ok_or(RuntimeError::ExpiredArenaKey)?;
-                match (left_object, right_object) {
-                    (Object::String { value: left }, Object::String { value: right }) => {
-                        Value::Boolean(left == right)
-                    }
-                }
+                Value::Boolean(left_key == right_key)
             }
             _ => Value::Boolean(false),
         })

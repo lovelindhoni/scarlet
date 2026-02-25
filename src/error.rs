@@ -12,13 +12,22 @@ pub enum TraceError {
 }
 
 #[derive(Debug, Error)]
-pub enum RuntimeError {
-    #[error("Type error: {message}\n[line {line}] in script")]
-    TypeError { line: u64, message: String },
-
+pub enum HeapError {
     // TODO: maybe do better debug msg, such as to include line, and the value type?
     #[error("Internal: Expired arena key")]
     ExpiredArenaKey,
+
+    #[error("Internal: Invalid interned key: expected `{expected}`, found `{found:?}` in arena")]
+    InvalidInternedKey { expected: String, found: String },
+}
+
+#[derive(Debug, Error)]
+pub enum RuntimeError {
+    #[error(transparent)]
+    Heap(#[from] HeapError),
+
+    #[error("Type error: {message}\n[line {line}] in script")]
+    TypeError { line: u64, message: String },
 
     #[error("Division By Zero: {left_num}/{right_num}\n[line {line}] in script")]
     DivisionByZero {
@@ -49,6 +58,9 @@ pub enum ScanError {
 pub enum CompileError {
     #[error("Syntax Error on {0}")]
     Scan(#[from] ScanError),
+
+    #[error(transparent)]
+    Heap(#[from] HeapError),
 
     #[error("Internal: Missing current token when parsing")]
     MissingCurrentToken,

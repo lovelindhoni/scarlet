@@ -1,6 +1,6 @@
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
-use crate::error::{InterpretError, RuntimeError};
+use crate::error::{HeapError, InterpretError, RuntimeError};
 use crate::heap::Heap;
 #[cfg(feature = "trace")]
 use crate::trace::diassemble_instruction;
@@ -79,7 +79,11 @@ impl<'a> VirtualMachine<'a> {
                     let value = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
                     if let Value::Object(key) = value {
                         let heap = self.heap.as_ref().ok_or(InterpretError::MissingHeap)?;
-                        let object = heap.arena.get(key).ok_or(RuntimeError::ExpiredArenaKey)?;
+                        let object = heap
+                            .arena
+                            .get(key)
+                            .ok_or(HeapError::ExpiredArenaKey)
+                            .map_err(RuntimeError::from)?;
                         println!("{:?}", object);
                     } else {
                         println!("{:?}", value);
@@ -128,10 +132,7 @@ impl<'a> VirtualMachine<'a> {
                 let heap = self.heap.as_mut().ok_or(InterpretError::MissingHeap)?;
                 Ok(left_operand.add(right_operand, line, heap)?)
             }
-            Instruction::Equal => {
-                let heap = self.heap.as_ref().ok_or(InterpretError::MissingHeap)?;
-                Ok(left_operand.equal(right_operand, heap)?)
-            }
+            Instruction::Equal => Ok(left_operand.equal(right_operand)?),
             Instruction::Subtract => Ok(left_operand.subtract(right_operand, line)?),
             Instruction::Multiply => Ok(left_operand.multiply(right_operand, line)?),
             Instruction::Divide => Ok(left_operand.divide(right_operand, line)?),

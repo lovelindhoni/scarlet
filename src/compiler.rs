@@ -1,6 +1,6 @@
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
-use crate::error::CompileError;
+use crate::error::{CompileError, HeapError};
 use crate::heap::{Heap, Object};
 use crate::scanner::{Scanner, Token, TokenType};
 
@@ -127,9 +127,33 @@ impl<'a> Parser<'a> {
         let lexeme = &previous_token.lexeme;
         let trimmed_lexeme = &lexeme[1..lexeme.len() - 1];
         let string_value = String::from_utf8_lossy(trimmed_lexeme).to_string();
-        let key = self.heap.arena.insert(Object::String {
-            value: string_value,
-        });
+        let key = if self.heap.intern_table.contains_key(&string_value) {
+            println!("hi");
+            let interned_key = self.heap.intern_table[&string_value];
+            let object = self
+                .heap
+                .arena
+                .get(interned_key)
+                .ok_or(HeapError::ExpiredArenaKey)?;
+            match object {
+                Object::String { value } => {
+                    if value != &string_value {
+                        return Err(HeapError::InvalidInternedKey {
+                            expected: string_value,
+                            found: value.to_owned(),
+                        }
+                        .into());
+                    }
+                }
+            }
+            interned_key
+        } else {
+            let interned_key = self.heap.arena.insert(Object::String {
+                value: string_value.clone(),
+            });
+            self.heap.intern_table.insert(string_value, interned_key);
+            interned_key
+        };
 
         self.chunk
             .write_constant(Value::Object(key), previous_token.line);
