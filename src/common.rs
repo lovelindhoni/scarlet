@@ -183,7 +183,10 @@ impl Value {
 }
 
 pub enum Instruction {
-    Constant(usize), // Constant variant holds the index of the constant value in the values array
+    Constant(usize),
+    DefineGlobal(usize),
+    GetGlobal(usize),
+    SetGlobal(usize),
     True,
     False,
     Nil,
@@ -198,4 +201,6 @@ pub enum Instruction {
     Equal,
     Greater,
     Less,
+    Print,
+    Pop,
 }

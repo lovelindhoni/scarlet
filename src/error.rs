@@ -81,6 +81,9 @@ pub enum CompileError {
         source: std::num::ParseFloatError,
     },
 
+    #[error("Invalid assignment target\n[line {line}]")]
+    InvalidAssignmentTarget { line: u64 },
+
     #[error("{msg}", msg = compile_error_helper(.message, .token))]
     MissingPrefixParser { message: String, token: Token },
 
@@ -107,6 +110,9 @@ pub enum InterpretError {
 
     #[error("Instruction pointer {ip} out of bounds (len = {len})")]
     InvalidInstructionPointer { ip: usize, len: usize },
+
+    #[error("Undefined variable '{identifier}'\n[line {line}] in script")]
+    UndefinedVariable { identifier: String, line: u64 },
 }
 
 fn compile_error_helper(message: &str, token: &Token) -> String {

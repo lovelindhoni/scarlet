@@ -6,23 +6,6 @@ use crate::scanner::{Scanner, Token, TokenType};
 
 type Result<T> = std::result::Result<T, CompileError>;
 
-pub fn compile(source: Vec<u8>, chunk: &mut Chunk, heap: &mut Heap) -> Result<()> {
-    let mut parser = Parser::new(source, chunk, heap);
-    parser.advance()?;
-    parser.expression()?;
-    parser.consume(TokenType::Eof, "Expect end of expression")?;
-    parser.end_compiler()?;
-    Ok(())
-}
-
-struct Parser<'a> {
-    previous: Option<Token>,
-    current: Option<Token>,
-    scanner: Scanner,
-    chunk: &'a mut Chunk,
-    heap: &'a mut Heap,
-}
-
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 enum Precedence {
@@ -58,7 +41,130 @@ impl Precedence {
     }
 }
 
+pub fn compile(source: Vec<u8>, chunk: &mut Chunk, heap: &mut Heap) -> Result<()> {
+    let mut parser = Parser::new(source, chunk, heap);
+    parser.advance()?;
+    while !parser.match_token(TokenType::Eof)? {
+        parser.declaration()?;
+    }
+    parser.end_compiler()?;
+    Ok(())
+}
+
+struct Parser<'a> {
+    previous: Option<Token>,
+    current: Option<Token>,
+    scanner: Scanner,
+    chunk: &'a mut Chunk,
+    heap: &'a mut Heap,
+}
+
 impl<'a> Parser<'a> {
+    fn identifier_constant(&mut self, token: Token) -> usize {
+        let identifier = String::from_utf8_lossy(&token.lexeme).to_string();
+        let key = if self.heap.intern_table.contains_key(&identifier) {
+            self.heap.intern_table[&identifier]
+        } else {
+            let interned_key = self.heap.arena.insert(Object::String {
+                value: identifier.clone(),
+            });
+            self.heap.intern_table.insert(identifier, interned_key);
+            interned_key
+        };
+        self.chunk.add_constant(Value::Object(key))
+    }
+
+    pub fn match_token(&mut self, token_variant: TokenType) -> Result<bool> {
+        Ok(if !self.check(token_variant)? {
+            false
+        } else {
+            self.advance()?;
+            true
+        })
+    }
+    fn check(&self, token_variant: TokenType) -> Result<bool> {
+        Ok(self
+            .current
+            .as_ref()
+            .ok_or(CompileError::MissingCurrentToken)?
+            .variant
+            == token_variant)
+    }
+    pub fn declaration(&mut self) -> Result<()> {
+        if self.match_token(TokenType::Let)? {
+            self.let_declaration()?;
+        } else {
+            self.statement()?;
+        }
+        Ok(())
+    }
+    fn parse_variable(&mut self, message: &str) -> Result<usize> {
+        self.consume(TokenType::Identifier, message)?;
+        let previous = self
+            .previous
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?;
+        Ok(self.identifier_constant(previous.clone()))
+    }
+    fn define_variable(&mut self, global: usize) -> Result<()> {
+        let line = self
+            .previous
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.chunk
+            .write_instruction(Instruction::DefineGlobal(global), line);
+        Ok(())
+    }
+    fn let_declaration(&mut self) -> Result<()> {
+        let global = self.parse_variable("Expect variable name")?;
+        if self.match_token(TokenType::Equal)? {
+            self.expression()?;
+        } else {
+            let line = self
+                .previous
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .line;
+            self.chunk.write_instruction(Instruction::Nil, line);
+        }
+        self.consume(
+            TokenType::Semicolon,
+            "Expect ';' after variable declaration",
+        )?;
+        self.define_variable(global)?;
+        Ok(())
+    }
+    fn statement(&mut self) -> Result<()> {
+        if self.match_token(TokenType::Print)? {
+            self.print_statement()?;
+        } else {
+            self.expression_statement()?;
+        }
+        Ok(())
+    }
+    fn expression_statement(&mut self) -> Result<()> {
+        self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after expression")?;
+        let line = self
+            .previous
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.chunk.write_instruction(Instruction::Pop, line);
+        Ok(())
+    }
+    fn print_statement(&mut self) -> Result<()> {
+        self.expression()?;
+        self.consume(TokenType::Semicolon, "Expect ';' after value")?;
+        let line = self
+            .previous
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.chunk.write_instruction(Instruction::Print, line);
+        Ok(())
+    }
     fn get_rule_precedence(&self, token_variant: TokenType) -> Precedence {
         match token_variant {
             TokenType::Minus | TokenType::Plus => Precedence::Term,
@@ -74,11 +180,12 @@ impl<'a> Parser<'a> {
             _ => Precedence::None,
         }
     }
-    fn execute_prefix_parser(&mut self, token_variant: TokenType) -> Result<()> {
+    fn execute_prefix_parser(&mut self, token_variant: TokenType, can_assign: bool) -> Result<()> {
         match token_variant {
             TokenType::LeftParen => self.grouping(),
             TokenType::Number => self.number(),
             TokenType::String => self.string(),
+            TokenType::Identifier => self.variable(can_assign),
             TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::True | TokenType::False | TokenType::Nil => self.literal(),
 
@@ -118,6 +225,30 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
+    fn variable(&mut self, can_assign: bool) -> Result<()> {
+        let previous = self
+            .previous
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?;
+        self.named_variable(previous.clone(), can_assign)?;
+        Ok(())
+    }
+
+    fn named_variable(&mut self, token: Token, can_assign: bool) -> Result<()> {
+        let line = token.line;
+        let idx = self.identifier_constant(token);
+        if can_assign && self.match_token(TokenType::Equal)? {
+            self.expression()?;
+            self.chunk
+                .write_instruction(Instruction::SetGlobal(idx), line);
+        } else {
+            self.chunk
+                .write_instruction(Instruction::GetGlobal(idx), line);
+        }
+        Ok(())
+    }
+
     fn string(&mut self) -> Result<()> {
         let previous_token = self
             .previous
@@ -155,8 +286,9 @@ impl<'a> Parser<'a> {
             interned_key
         };
 
+        let constant_idx = self.chunk.add_constant(Value::Object(key));
         self.chunk
-            .write_constant(Value::Object(key), previous_token.line);
+            .write_instruction(Instruction::Constant(constant_idx), previous_token.line);
 
         Ok(())
     }
@@ -223,7 +355,8 @@ impl<'a> Parser<'a> {
         self.advance()?;
 
         let prev_variant = self.previous.as_ref().expect("No previous token").variant;
-        self.execute_prefix_parser(prev_variant)?;
+        let can_assign = precedence <= Precedence::Assignment;
+        self.execute_prefix_parser(prev_variant, can_assign)?;
 
         while {
             let curr_variant = self
@@ -242,6 +375,15 @@ impl<'a> Parser<'a> {
                 .variant;
             self.execute_infix_parser(prev_variant)?;
         }
+        if can_assign && self.match_token(TokenType::Equal)? {
+            return Err(CompileError::InvalidAssignmentTarget {
+                line: self
+                    .current
+                    .as_ref()
+                    .ok_or(CompileError::MissingCurrentToken)?
+                    .line,
+            });
+        }
         Ok(())
     }
     fn number(&mut self) -> Result<()> {
@@ -257,8 +399,9 @@ impl<'a> Parser<'a> {
             source: e,
         })?;
 
+        let constant_idx = self.chunk.add_constant(Value::Number(value));
         self.chunk
-            .write_constant(Value::Number(value), previous_token.line);
+            .write_instruction(Instruction::Constant(constant_idx), previous_token.line);
         Ok(())
     }
     fn grouping(&mut self) -> Result<()> {

@@ -1,7 +1,7 @@
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::{HeapError, InterpretError, RuntimeError};
-use crate::heap::Heap;
+use crate::heap::{Heap, Object};
 #[cfg(feature = "trace")]
 use crate::trace::diassemble_instruction;
 
@@ -45,6 +45,99 @@ impl<'a> VirtualMachine<'a> {
             #[cfg(feature = "trace")]
             diassemble_instruction(chunk, self.ip);
             match instruction {
+                Instruction::SetGlobal(pos) => {
+                    let heap = self.heap.as_mut().ok_or(InterpretError::MissingHeap)?;
+                    if let Value::Object(key) = chunk.values[*pos] {
+                        let object = heap
+                            .arena
+                            .get(key)
+                            .ok_or(HeapError::ExpiredArenaKey)
+                            .map_err(RuntimeError::from)?;
+
+                        match object {
+                            Object::String { value: name } => {
+                                if heap.globals.contains_key(name) {
+                                    heap.globals.insert(
+                                        name.to_owned(),
+                                        self.stack
+                                            .last()
+                                            .ok_or(InterpretError::EmptyStack)?
+                                            .to_owned(),
+                                    );
+                                } else {
+                                    return Err(InterpretError::UndefinedVariable {
+                                        identifier: name.to_owned(),
+                                        line: chunk.get_line(self.ip),
+                                    });
+                                }
+                            }
+                        }
+                    } else {
+                        // unreachable
+                    }
+                }
+                Instruction::GetGlobal(pos) => {
+                    let heap = self.heap.as_mut().ok_or(InterpretError::MissingHeap)?;
+                    if let Value::Object(key) = chunk.values[*pos] {
+                        let object = heap
+                            .arena
+                            .get(key)
+                            .ok_or(HeapError::ExpiredArenaKey)
+                            .map_err(RuntimeError::from)?;
+
+                        match object {
+                            Object::String { value: name } => {
+                                if !heap.globals.contains_key(name) {
+                                    return Err(InterpretError::UndefinedVariable {
+                                        identifier: name.to_owned(),
+                                        line: chunk.get_line(self.ip),
+                                    });
+                                } else {
+                                    self.stack.push(heap.globals[name].clone());
+                                }
+                            }
+                        }
+                    } else {
+                        // unreachable
+                    }
+                }
+                Instruction::DefineGlobal(pos) => {
+                    let heap = self.heap.as_mut().ok_or(InterpretError::MissingHeap)?;
+                    if let Value::Object(key) = chunk.values[*pos] {
+                        let object = heap
+                            .arena
+                            .get(key)
+                            .ok_or(HeapError::ExpiredArenaKey)
+                            .map_err(RuntimeError::from)?;
+
+                        match object {
+                            Object::String { value: name } => {
+                                let value = self.stack.last().ok_or(InterpretError::EmptyStack)?;
+                                heap.globals.insert(name.clone(), value.clone());
+                                self.stack.pop().ok_or(InterpretError::EmptyStack)?;
+                            }
+                        }
+                    } else {
+                        // unreachable
+                    }
+                }
+                Instruction::Pop => {
+                    self.stack.pop().ok_or(InterpretError::EmptyStack)?;
+                }
+                Instruction::Print => {
+                    let value = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
+                    if let Value::Object(key) = value {
+                        let heap = self.heap.as_ref().ok_or(InterpretError::MissingHeap)?;
+                        let object = heap
+                            .arena
+                            .get(key)
+                            .ok_or(HeapError::ExpiredArenaKey)
+                            .map_err(RuntimeError::from)?;
+                        println!("{:?}", object);
+                    } else {
+                        println!("{:?}", value);
+                    }
+                }
                 Instruction::Constant(pos) => {
                     let value = &chunk.values[*pos];
                     self.stack.push(value.clone());
@@ -76,18 +169,6 @@ impl<'a> VirtualMachine<'a> {
                     self.stack.push(result);
                 }
                 Instruction::Return => {
-                    let value = self.stack.pop().ok_or(InterpretError::EmptyStack)?;
-                    if let Value::Object(key) = value {
-                        let heap = self.heap.as_ref().ok_or(InterpretError::MissingHeap)?;
-                        let object = heap
-                            .arena
-                            .get(key)
-                            .ok_or(HeapError::ExpiredArenaKey)
-                            .map_err(RuntimeError::from)?;
-                        println!("{:?}", object);
-                    } else {
-                        println!("{:?}", value);
-                    }
                     return Ok(());
                 }
                 Instruction::Negate => {

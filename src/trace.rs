@@ -34,6 +34,12 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
             len: chunk.instructions.len(),
         })?;
     match instruction {
+        Instruction::Pop => {
+            simple_instruction(idx, chunk, "POP");
+        }
+        Instruction::Print => {
+            simple_instruction(idx, chunk, "PRINT");
+        }
         Instruction::Negate => {
             simple_instruction(idx, chunk, "NEGATE");
         }
@@ -76,6 +82,53 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
         Instruction::Less => {
             simple_instruction(idx, chunk, "LESS");
         }
+        Instruction::SetGlobal(pos) => {
+            // TODO: need to account for objects properly here
+            if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
+                println!("{} | SET_GLOBAL {}'{:?}'", idx, pos, chunk.values[*pos]);
+            } else {
+                // pos = index in constants array
+                println!(
+                    "{} {} SET_GLOBAL {}'{:?}'",
+                    idx,
+                    chunk.get_line(idx),
+                    pos,
+                    chunk.values[*pos]
+                );
+            }
+        }
+
+        Instruction::DefineGlobal(pos) => {
+            // TODO: need to account for objects properly here
+            if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
+                println!("{} | DEFINE_GLOBAL {}'{:?}'", idx, pos, chunk.values[*pos]);
+            } else {
+                // pos = index in constants array
+                println!(
+                    "{} {} DEFINE_GLOBAL {}'{:?}'",
+                    idx,
+                    chunk.get_line(idx),
+                    pos,
+                    chunk.values[*pos]
+                );
+            }
+        }
+        Instruction::GetGlobal(pos) => {
+            // TODO: need to account for objects properly here
+            if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
+                println!("{} | GET_GLOBAL {}'{:?}'", idx, pos, chunk.values[*pos]);
+            } else {
+                // pos = index in constants array
+                println!(
+                    "{} {} GET_GLOBAL {}'{:?}'",
+                    idx,
+                    chunk.get_line(idx),
+                    pos,
+                    chunk.values[*pos]
+                );
+            }
+        }
+
         Instruction::Constant(pos) => {
             // TODO: need to account for objects properly here
             if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {

@@ -40,8 +40,8 @@ impl Chunk {
         self.instructions.push(instruction);
         self.add_line(line);
     }
-    pub fn write_constant(&mut self, value: Value, line: u64) {
+    pub fn add_constant(&mut self, value: Value) -> usize {
         self.values.push(value);
-        self.write_instruction(Instruction::Constant(self.values.len() - 1), line);
+        self.values.len() - 1
     }
 }
