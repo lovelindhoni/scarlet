@@ -84,6 +84,15 @@ pub enum CompileError {
     #[error("Invalid assignment target\n[line {line}]")]
     InvalidAssignmentTarget { line: u64 },
 
+    #[error("Internal: No local variables found in the scope")]
+    LocalsEmpty,
+
+    #[error("{msg}", msg= compile_error_helper("Can't read local variable in its own initializer", token))]
+    LocalVarInItsOwnInitializer { token: Token },
+
+    #[error("{msg}", msg = compile_error_helper("Already variable with this name in this scope", token))]
+    RedefinitionOfLocalVar { token: Token },
+
     #[error("{msg}", msg = compile_error_helper(.message, .token))]
     MissingPrefixParser { message: String, token: Token },
 

@@ -45,6 +45,16 @@ impl<'a> VirtualMachine<'a> {
             #[cfg(feature = "trace")]
             diassemble_instruction(chunk, self.ip);
             match instruction {
+                Instruction::SetLocal(pos) => {
+                    self.stack[*pos] = self
+                        .stack
+                        .last()
+                        .ok_or(InterpretError::EmptyStack)?
+                        .to_owned();
+                }
+                Instruction::GetLocal(pos) => {
+                    self.stack.push(self.stack[*pos].to_owned());
+                }
                 Instruction::SetGlobal(pos) => {
                     let heap = self.heap.as_mut().ok_or(InterpretError::MissingHeap)?;
                     if let Value::Object(key) = chunk.values[*pos] {

@@ -1,5 +1,3 @@
-use std::fmt::{Display, Formatter};
-
 use crate::{
     error::{HeapError, RuntimeError},
     heap::{Heap, Object},
@@ -189,6 +187,8 @@ pub enum Instruction {
     DefineGlobal(usize),
     GetGlobal(usize),
     SetGlobal(usize),
+    GetLocal(usize),
+    SetLocal(usize),
     True,
     False,
     Nil,
@@ -214,6 +214,8 @@ impl Instruction {
             Instruction::DefineGlobal(_) => "DEFINE_GLOBAL",
             Instruction::GetGlobal(_) => "GET_GLOBAL",
             Instruction::SetGlobal(_) => "SET_GLOBAL",
+            Instruction::GetLocal(_) => "GET_LOCAL",
+            Instruction::SetLocal(_) => "SET_LOCAL",
 
             Instruction::True => "TRUE",
             Instruction::False => "FALSE",

@@ -6,9 +6,14 @@ type Result<T> = std::result::Result<T, TraceError>;
 
 fn simple_instruction(idx: usize, chunk: &Chunk, instruction: &Instruction) {
     if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
-        println!("{} | {}", idx, instruction.opcode());
+        println!("{:04} | {:<16}", idx, instruction.opcode());
     } else {
-        println!("{} {} {}", idx, chunk.get_line(idx), instruction.opcode());
+        println!(
+            "{:04} {:4} {:<16}",
+            idx,
+            chunk.get_line(idx),
+            instruction.opcode()
+        );
     }
 }
 
@@ -16,21 +21,34 @@ fn constant_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &In
     // TODO: need to account for objects properly here
     if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
         println!(
-            "{} | {} {}'{:?}'",
+            "{:04} | {:<16} {:4} '{:?}'",
             idx,
             instruction.opcode(),
             pos,
             chunk.values[*pos]
         );
     } else {
-        // pos = index in constants array
         println!(
-            "{} {} {} {}'{:?}'",
+            "{:04} {:4} {:<16} {:4} '{:?}'",
             idx,
             chunk.get_line(idx),
             instruction.opcode(),
             pos,
             chunk.values[*pos]
+        );
+    }
+}
+
+fn byte_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &Instruction) {
+    if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
+        println!("{:04} | {:<16} {:4}", idx, instruction.opcode(), pos);
+    } else {
+        println!(
+            "{:04} {:4} {:<16} {:4}",
+            idx,
+            chunk.get_line(idx),
+            instruction.opcode(),
+            pos
         );
     }
 }
@@ -57,6 +75,9 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
             len: chunk.instructions.len(),
         })?;
     match instruction {
+        Instruction::SetLocal(pos) | Instruction::GetLocal(pos) => {
+            byte_instruction(idx, chunk, pos, instruction);
+        }
         Instruction::GetGlobal(pos)
         | Instruction::SetGlobal(pos)
         | Instruction::Constant(pos)
