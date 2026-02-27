@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 use crate::{
     error::{HeapError, RuntimeError},
     heap::{Heap, Object},
@@ -203,4 +205,35 @@ pub enum Instruction {
     Less,
     Print,
     Pop,
+}
+
+impl Instruction {
+    pub fn opcode(&self) -> &'static str {
+        match self {
+            Instruction::Constant(_) => "CONSTANT",
+            Instruction::DefineGlobal(_) => "DEFINE_GLOBAL",
+            Instruction::GetGlobal(_) => "GET_GLOBAL",
+            Instruction::SetGlobal(_) => "SET_GLOBAL",
+
+            Instruction::True => "TRUE",
+            Instruction::False => "FALSE",
+            Instruction::Nil => "NIL",
+            Instruction::Return => "RETURN",
+
+            Instruction::Negate => "NEGATE",
+            Instruction::Add => "ADD",
+            Instruction::Subtract => "SUBTRACT",
+            Instruction::Multiply => "MULTIPLY",
+            Instruction::Modulo => "MODULO",
+            Instruction::Divide => "DIVIDE",
+
+            Instruction::Not => "NOT",
+            Instruction::Equal => "EQUAL",
+            Instruction::Greater => "GREATER",
+            Instruction::Less => "LESS",
+
+            Instruction::Print => "PRINT",
+            Instruction::Pop => "POP",
+        }
+    }
 }

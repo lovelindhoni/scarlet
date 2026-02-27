@@ -4,11 +4,34 @@ use crate::error::TraceError;
 
 type Result<T> = std::result::Result<T, TraceError>;
 
-fn simple_instruction(idx: usize, chunk: &Chunk, opcode: &str) {
+fn simple_instruction(idx: usize, chunk: &Chunk, instruction: &Instruction) {
     if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
-        println!("{} | {}", idx, opcode);
+        println!("{} | {}", idx, instruction.opcode());
     } else {
-        println!("{} {} {}", idx, chunk.get_line(idx), opcode);
+        println!("{} {} {}", idx, chunk.get_line(idx), instruction.opcode());
+    }
+}
+
+fn constant_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &Instruction) {
+    // TODO: need to account for objects properly here
+    if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
+        println!(
+            "{} | {} {}'{:?}'",
+            idx,
+            instruction.opcode(),
+            pos,
+            chunk.values[*pos]
+        );
+    } else {
+        // pos = index in constants array
+        println!(
+            "{} {} {} {}'{:?}'",
+            idx,
+            chunk.get_line(idx),
+            instruction.opcode(),
+            pos,
+            chunk.values[*pos]
+        );
     }
 }
 
@@ -34,115 +57,14 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
             len: chunk.instructions.len(),
         })?;
     match instruction {
-        Instruction::Pop => {
-            simple_instruction(idx, chunk, "POP");
+        Instruction::GetGlobal(pos)
+        | Instruction::SetGlobal(pos)
+        | Instruction::Constant(pos)
+        | Instruction::DefineGlobal(pos) => {
+            constant_instruction(idx, chunk, pos, instruction);
         }
-        Instruction::Print => {
-            simple_instruction(idx, chunk, "PRINT");
-        }
-        Instruction::Negate => {
-            simple_instruction(idx, chunk, "NEGATE");
-        }
-        Instruction::Return => {
-            simple_instruction(idx, chunk, "RETURN");
-        }
-        Instruction::Add => {
-            simple_instruction(idx, chunk, "ADD");
-        }
-        Instruction::Subtract => {
-            simple_instruction(idx, chunk, "SUBTRACT");
-        }
-        Instruction::Multiply => {
-            simple_instruction(idx, chunk, "MULTIPLY");
-        }
-        Instruction::Divide => {
-            simple_instruction(idx, chunk, "DIVIDE");
-        }
-        Instruction::Modulo => {
-            simple_instruction(idx, chunk, "MODULO");
-        }
-        Instruction::True => {
-            simple_instruction(idx, chunk, "TRUE");
-        }
-        Instruction::False => {
-            simple_instruction(idx, chunk, "FALSE");
-        }
-        Instruction::Nil => {
-            simple_instruction(idx, chunk, "NIL");
-        }
-        Instruction::Not => {
-            simple_instruction(idx, chunk, "NOT");
-        }
-        Instruction::Equal => {
-            simple_instruction(idx, chunk, "EQUAL");
-        }
-        Instruction::Greater => {
-            simple_instruction(idx, chunk, "GREATER");
-        }
-        Instruction::Less => {
-            simple_instruction(idx, chunk, "LESS");
-        }
-        Instruction::SetGlobal(pos) => {
-            // TODO: need to account for objects properly here
-            if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
-                println!("{} | SET_GLOBAL {}'{:?}'", idx, pos, chunk.values[*pos]);
-            } else {
-                // pos = index in constants array
-                println!(
-                    "{} {} SET_GLOBAL {}'{:?}'",
-                    idx,
-                    chunk.get_line(idx),
-                    pos,
-                    chunk.values[*pos]
-                );
-            }
-        }
-
-        Instruction::DefineGlobal(pos) => {
-            // TODO: need to account for objects properly here
-            if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
-                println!("{} | DEFINE_GLOBAL {}'{:?}'", idx, pos, chunk.values[*pos]);
-            } else {
-                // pos = index in constants array
-                println!(
-                    "{} {} DEFINE_GLOBAL {}'{:?}'",
-                    idx,
-                    chunk.get_line(idx),
-                    pos,
-                    chunk.values[*pos]
-                );
-            }
-        }
-        Instruction::GetGlobal(pos) => {
-            // TODO: need to account for objects properly here
-            if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
-                println!("{} | GET_GLOBAL {}'{:?}'", idx, pos, chunk.values[*pos]);
-            } else {
-                // pos = index in constants array
-                println!(
-                    "{} {} GET_GLOBAL {}'{:?}'",
-                    idx,
-                    chunk.get_line(idx),
-                    pos,
-                    chunk.values[*pos]
-                );
-            }
-        }
-
-        Instruction::Constant(pos) => {
-            // TODO: need to account for objects properly here
-            if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
-                println!("{} | CONSTANT {}'{:?}'", idx, pos, chunk.values[*pos]);
-            } else {
-                // pos = index in constants array
-                println!(
-                    "{} {} CONSTANT {}'{:?}'",
-                    idx,
-                    chunk.get_line(idx),
-                    pos,
-                    chunk.values[*pos]
-                );
-            }
+        _ => {
+            simple_instruction(idx, chunk, instruction);
         }
     }
     Ok(())
