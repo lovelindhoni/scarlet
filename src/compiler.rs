@@ -86,8 +86,8 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn identifier_constant(&mut self, token: Token) -> usize {
-        let identifier = String::from_utf8_lossy(&token.lexeme).to_string();
+    fn identifier_idx(&mut self, lexeme: Vec<u8>) -> usize {
+        let identifier = String::from_utf8_lossy(&lexeme).to_string();
         let key = if self.heap.intern_table.contains_key(&identifier) {
             self.heap.intern_table[&identifier]
         } else {
@@ -134,7 +134,7 @@ impl<'a> Parser<'a> {
                 .previous_token
                 .as_ref()
                 .ok_or(CompileError::MissingPreviousToken)?;
-            Ok(self.identifier_constant(previous.clone()))
+            Ok(self.identifier_idx(previous.lexeme.to_owned()))
         }
     }
     fn declare_variable(&mut self) -> Result<()> {
@@ -190,7 +190,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
     fn let_declaration(&mut self) -> Result<()> {
-        let global = self.parse_variable("Expect variable name")?;
+        let variable = self.parse_variable("Expect variable name")?;
         if self.match_token(TokenType::Equal)? {
             self.expression()?;
         } else {
@@ -205,7 +205,7 @@ impl<'a> Parser<'a> {
             TokenType::Semicolon,
             "Expect ';' after variable declaration",
         )?;
-        self.define_variable(global)?;
+        self.define_variable(variable)?;
         Ok(())
     }
     fn statement(&mut self) -> Result<()> {
@@ -334,9 +334,9 @@ impl<'a> Parser<'a> {
     fn variable(&mut self, can_assign: bool) -> Result<()> {
         let previous = self
             .previous_token
-            .as_ref()
+            .to_owned()
             .ok_or(CompileError::MissingPreviousToken)?;
-        self.named_variable(previous.clone(), can_assign)?;
+        self.named_variable(previous, can_assign)?;
         Ok(())
     }
 
@@ -352,7 +352,7 @@ impl<'a> Parser<'a> {
                     .write_instruction(Instruction::GetLocal(idx), line);
             }
         } else {
-            let idx = self.identifier_constant(token);
+            let idx = self.identifier_idx(token.lexeme);
             if can_assign && self.match_token(TokenType::Equal)? {
                 self.expression()?;
                 self.chunk
@@ -389,7 +389,6 @@ impl<'a> Parser<'a> {
         let trimmed_lexeme = &lexeme[1..lexeme.len() - 1];
         let string_value = String::from_utf8_lossy(trimmed_lexeme).to_string();
         let key = if self.heap.intern_table.contains_key(&string_value) {
-            println!("hi");
             let interned_key = self.heap.intern_table[&string_value];
             let object = self
                 .heap
@@ -487,7 +486,7 @@ impl<'a> Parser<'a> {
         let prev_variant = self
             .previous_token
             .as_ref()
-            .expect("No previous token")
+            .ok_or(CompileError::MissingPreviousToken)?
             .variant;
         let can_assign = precedence <= Precedence::Assignment;
         self.execute_prefix_parser(prev_variant, can_assign)?;
@@ -575,20 +574,21 @@ impl<'a> Parser<'a> {
         Ok(())
     }
     fn emit_return(&mut self) -> Result<()> {
-        let previous_token = self
+        let line = self
             .previous_token
             .as_ref()
-            .ok_or(CompileError::MissingPreviousToken)?;
-        self.chunk
-            .write_instruction(Instruction::Return, previous_token.line);
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.chunk.write_instruction(Instruction::Return, line);
         Ok(())
     }
     pub fn new(source: Vec<u8>, chunk: &'a mut Chunk, heap: &'a mut Heap) -> Self {
         let scanner = Scanner::new(source);
+        let compiler = Compiler::new();
         Self {
             previous_token: None,
             current_token: None,
-            current: Compiler::new(),
+            current: compiler,
             scanner,
             chunk,
             heap,
@@ -597,14 +597,14 @@ impl<'a> Parser<'a> {
     fn consume(&mut self, token_variant: TokenType, message: &str) -> Result<()> {
         let token = self
             .current_token
-            .as_ref()
+            .to_owned()
             .ok_or(CompileError::MissingCurrentToken)?;
         if token_variant == token.variant {
             self.advance()?;
         } else {
             return Err(CompileError::UnexpectedToken {
                 message: message.to_owned(),
-                token: token.clone(),
+                token: token,
             });
         }
         Ok(())

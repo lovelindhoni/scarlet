@@ -4,53 +4,41 @@ use crate::error::TraceError;
 
 type Result<T> = std::result::Result<T, TraceError>;
 
-fn simple_instruction(idx: usize, chunk: &Chunk, instruction: &Instruction) {
-    if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
-        println!("{:04} | {:<16}", idx, instruction.opcode());
+fn print_prefix(idx: usize, chunk: &Chunk) -> String {
+    let same_line = idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx);
+    if same_line {
+        "|".to_string()
     } else {
-        println!(
-            "{:04} {:4} {:<16}",
-            idx,
-            chunk.get_line(idx),
-            instruction.opcode()
-        );
+        chunk.get_line(idx).to_string()
     }
+}
+
+fn simple_instruction(idx: usize, chunk: &Chunk, instruction: &Instruction) {
+    let line = print_prefix(idx, chunk);
+    println!("{:04} {:>4} {:<16}", idx, line, instruction.opcode());
 }
 
 fn constant_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &Instruction) {
-    // TODO: need to account for objects properly here
-    if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
-        println!(
-            "{:04} | {:<16} {:4} '{:?}'",
-            idx,
-            instruction.opcode(),
-            pos,
-            chunk.values[*pos]
-        );
-    } else {
-        println!(
-            "{:04} {:4} {:<16} {:4} '{:?}'",
-            idx,
-            chunk.get_line(idx),
-            instruction.opcode(),
-            pos,
-            chunk.values[*pos]
-        );
-    }
+    let line = print_prefix(idx, chunk);
+    println!(
+        "{:04} {:>4} {:<16} {:4} '{:?}'",
+        idx,
+        line,
+        instruction.opcode(),
+        pos,
+        chunk.values[*pos]
+    );
 }
 
 fn byte_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &Instruction) {
-    if idx > 0 && chunk.get_line(idx - 1) == chunk.get_line(idx) {
-        println!("{:04} | {:<16} {:4}", idx, instruction.opcode(), pos);
-    } else {
-        println!(
-            "{:04} {:4} {:<16} {:4}",
-            idx,
-            chunk.get_line(idx),
-            instruction.opcode(),
-            pos
-        );
-    }
+    let line = print_prefix(idx, chunk);
+    println!(
+        "{:04} {:>4} {:<16} {:4}",
+        idx,
+        line,
+        instruction.opcode(),
+        pos
+    );
 }
 
 pub fn diassemble(chunk: &Chunk) -> Result<()> {
