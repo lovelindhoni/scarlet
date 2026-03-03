@@ -217,6 +217,8 @@ impl<'a> Parser<'a> {
             self.if_statement()?;
         } else if self.match_token(TokenType::While)? {
             self.while_statement()?;
+        } else if self.match_token(TokenType::For)? {
+            self.for_statement()?;
         } else if self.match_token(TokenType::LeftBrace)? {
             self.begin_scope();
             self.block()?;
@@ -224,6 +226,83 @@ impl<'a> Parser<'a> {
         } else {
             self.expression_statement()?;
         }
+        Ok(())
+    }
+    fn for_statement(&mut self) -> Result<()> {
+        self.begin_scope();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.")?;
+        if self.match_token(TokenType::Semicolon)? {
+            // No initializer.
+        } else if self.match_token(TokenType::Let)? {
+            self.let_declaration()?;
+        } else {
+            self.expression_statement()?;
+        }
+
+        let mut loop_start = self.chunk.instructions.len();
+        let mut exit_jump: Option<usize> = None;
+
+        if !self.match_token(TokenType::Semicolon)? {
+            self.expression()?;
+            self.consume(TokenType::Semicolon, "Expect ';' after loop condition.")?;
+
+            let line = self
+                .previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .line;
+
+            self.chunk
+                .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
+
+            exit_jump = Some(self.chunk.instructions.len() - 1);
+
+            self.chunk.write_instruction(Instruction::Pop, line);
+        }
+
+        if !self.match_token(TokenType::RightParen)? {
+            let line = self
+                .previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .line;
+
+            self.chunk
+                .write_instruction(Instruction::Jump(usize::MAX), line);
+
+            let body_jump = self.chunk.instructions.len() - 1;
+
+            let increment_start = self.chunk.instructions.len();
+
+            self.expression()?;
+            self.chunk.write_instruction(Instruction::Pop, line);
+
+            self.consume(TokenType::RightParen, "Expect ')' after for clauses.")?;
+
+            self.emit_loop(loop_start)?;
+
+            loop_start = increment_start;
+
+            self.patch_jump(body_jump)?;
+        }
+
+        self.statement()?;
+
+        self.emit_loop(loop_start)?;
+
+        if let Some(jump) = exit_jump {
+            self.patch_jump(jump)?;
+
+            let line = self
+                .previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .line;
+
+            self.chunk.write_instruction(Instruction::Pop, line);
+        }
+
+        self.end_scope()?;
         Ok(())
     }
     fn while_statement(&mut self) -> Result<()> {
