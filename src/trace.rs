@@ -30,6 +30,20 @@ fn constant_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &In
     );
 }
 
+fn jump_instruction(idx: usize, chunk: &Chunk, offset: &usize, instruction: &Instruction) {
+    let line = print_prefix(idx, chunk);
+    let destination = idx + 1 + *offset;
+
+    println!(
+        "{:04} {:>4} {:<16} {:4} -> {:04}",
+        idx,
+        line,
+        instruction.opcode(),
+        offset,
+        destination
+    );
+}
+
 fn byte_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &Instruction) {
     let line = print_prefix(idx, chunk);
     println!(
@@ -65,6 +79,9 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
     match instruction {
         Instruction::SetLocal(pos) | Instruction::GetLocal(pos) => {
             byte_instruction(idx, chunk, pos, instruction);
+        }
+        Instruction::Jump(offset) | Instruction::JumpIfFalse(offset) => {
+            jump_instruction(idx, chunk, offset, instruction);
         }
         Instruction::GetGlobal(pos)
         | Instruction::SetGlobal(pos)

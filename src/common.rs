@@ -189,6 +189,8 @@ pub enum Instruction {
     SetGlobal(usize),
     GetLocal(usize),
     SetLocal(usize),
+    JumpIfFalse(usize),
+    Jump(usize),
     True,
     False,
     Nil,
@@ -216,6 +218,9 @@ impl Instruction {
             Instruction::SetGlobal(_) => "SET_GLOBAL",
             Instruction::GetLocal(_) => "GET_LOCAL",
             Instruction::SetLocal(_) => "SET_LOCAL",
+
+            Instruction::Jump(_) => "JUMP",
+            Instruction::JumpIfFalse(_) => "JUMP_IF_FALSE",
 
             Instruction::True => "TRUE",
             Instruction::False => "FALSE",

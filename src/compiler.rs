@@ -1,3 +1,5 @@
+use std::usize;
+
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::{CompileError, HeapError};
@@ -211,6 +213,8 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) -> Result<()> {
         if self.match_token(TokenType::Print)? {
             self.print_statement()?;
+        } else if self.match_token(TokenType::If)? {
+            self.if_statement()?;
         } else if self.match_token(TokenType::LeftBrace)? {
             self.begin_scope();
             self.block()?;
@@ -220,6 +224,54 @@ impl<'a> Parser<'a> {
         }
         Ok(())
     }
+    fn if_statement(&mut self) -> Result<()> {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'")?;
+        self.expression()?;
+        self.consume(TokenType::RightParen, "Expect ')' after condition in 'if'")?;
+
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.chunk
+            .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
+        let then_jump = self.chunk.instructions.len() - 1;
+        self.chunk.write_instruction(Instruction::Pop, line);
+        self.statement()?;
+        self.chunk
+            .write_instruction(Instruction::Jump(usize::MAX), line);
+        let else_jump = self.chunk.instructions.len() - 1;
+        self.patch_jump(then_jump)?;
+        self.chunk.write_instruction(Instruction::Pop, line);
+        if self.match_token(TokenType::Else)? {
+            self.statement()?;
+        }
+
+        self.patch_jump(else_jump)?;
+
+        Ok(())
+    }
+
+    fn patch_jump(&mut self, jump_index: usize) -> Result<()> {
+        let current = self.chunk.instructions.len();
+        let jump = current
+            .checked_sub(jump_index + 1)
+            .ok_or(CompileError::InvalidJumpPatch { index: jump_index })?;
+
+        match &mut self.chunk.instructions[jump_index] {
+            Instruction::JumpIfFalse(offset) | Instruction::Jump(offset) => {
+                *offset = jump;
+            }
+            _ => return Err(CompileError::InvalidJumpPatch { index: jump_index }),
+        }
+        Ok(())
+    }
+
+    fn emit_jump(&mut self) -> Result<usize> {
+        Ok(self.chunk.instructions.len() - 1)
+    }
+
     fn block(&mut self) -> Result<()> {
         while !self.check(TokenType::RightBrace)? && !self.check(TokenType::Eof)? {
             self.declaration()?;

@@ -32,6 +32,7 @@ impl<'a> VirtualMachine<'a> {
                     len: chunk.instructions.len(),
                 },
             )?;
+            self.ip += 1;
             #[cfg(feature = "trace")]
             println!("Gutting VM's stack");
             #[cfg(feature = "trace")]
@@ -45,6 +46,19 @@ impl<'a> VirtualMachine<'a> {
             #[cfg(feature = "trace")]
             diassemble_instruction(chunk, self.ip);
             match instruction {
+                Instruction::Jump(offset) => {
+                    self.ip += offset;
+                }
+                Instruction::JumpIfFalse(offset) => {
+                    let is_falsey = match self.stack.last().ok_or(InterpretError::EmptyStack)? {
+                        Value::Boolean(boolean) => !*boolean,
+                        Value::Nil => true,
+                        _ => false,
+                    };
+                    if is_falsey {
+                        self.ip += offset;
+                    }
+                }
                 Instruction::SetLocal(pos) => {
                     self.stack[*pos] = self
                         .stack
@@ -206,7 +220,6 @@ impl<'a> VirtualMachine<'a> {
                     self.stack.push(result);
                 }
             }
-            self.ip += 1;
         }
     }
     pub fn interpret(&mut self, chunk: &'a Chunk, heap: &'a mut Heap) -> Result<()> {

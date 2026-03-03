@@ -68,6 +68,9 @@ pub enum CompileError {
     #[error("Internal: Missing previous token when parsing")]
     MissingPreviousToken,
 
+    #[error("Internal: Invalid jump patch at instruction index {index}")]
+    InvalidJumpPatch { index: usize },
+
     #[error("{msg}", msg = compile_error_helper(.message, .token))]
     UnexpectedToken { message: String, token: Token },
 
