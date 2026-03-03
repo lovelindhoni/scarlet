@@ -80,7 +80,9 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
         Instruction::SetLocal(pos) | Instruction::GetLocal(pos) => {
             byte_instruction(idx, chunk, pos, instruction);
         }
-        Instruction::Jump(offset) | Instruction::JumpIfFalse(offset) => {
+        Instruction::Jump(offset)
+        | Instruction::JumpIfFalse(offset)
+        | Instruction::Loop(offset) => {
             jump_instruction(idx, chunk, offset, instruction);
         }
         Instruction::GetGlobal(pos)

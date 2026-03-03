@@ -215,6 +215,8 @@ impl<'a> Parser<'a> {
             self.print_statement()?;
         } else if self.match_token(TokenType::If)? {
             self.if_statement()?;
+        } else if self.match_token(TokenType::While)? {
+            self.while_statement()?;
         } else if self.match_token(TokenType::LeftBrace)? {
             self.begin_scope();
             self.block()?;
@@ -222,6 +224,40 @@ impl<'a> Parser<'a> {
         } else {
             self.expression_statement()?;
         }
+        Ok(())
+    }
+    fn while_statement(&mut self) -> Result<()> {
+        let loop_start = self.chunk.instructions.len();
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'")?;
+        self.expression()?;
+        self.consume(
+            TokenType::RightParen,
+            "Expect ')' after condition in 'while'",
+        )?;
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.chunk
+            .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
+        let exit_jump = self.chunk.instructions.len() - 1;
+        self.chunk.write_instruction(Instruction::Pop, line);
+        self.statement()?;
+        self.emit_loop(loop_start)?;
+        self.patch_jump(exit_jump)?;
+        self.chunk.write_instruction(Instruction::Pop, line);
+        Ok(())
+    }
+    fn emit_loop(&mut self, loop_start: usize) -> Result<()> {
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        let offset = self.chunk.instructions.len() - loop_start + 1;
+        self.chunk
+            .write_instruction(Instruction::Loop(offset), line);
         Ok(())
     }
     fn if_statement(&mut self) -> Result<()> {

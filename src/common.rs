@@ -191,6 +191,7 @@ pub enum Instruction {
     SetLocal(usize),
     JumpIfFalse(usize),
     Jump(usize),
+    Loop(usize),
     True,
     False,
     Nil,
@@ -221,6 +222,7 @@ impl Instruction {
 
             Instruction::Jump(_) => "JUMP",
             Instruction::JumpIfFalse(_) => "JUMP_IF_FALSE",
+            Instruction::Loop(_) => "LOOP",
 
             Instruction::True => "TRUE",
             Instruction::False => "FALSE",

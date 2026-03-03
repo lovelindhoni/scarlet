@@ -46,6 +46,9 @@ impl<'a> VirtualMachine<'a> {
             #[cfg(feature = "trace")]
             diassemble_instruction(chunk, self.ip);
             match instruction {
+                Instruction::Loop(offset) => {
+                    self.ip -= offset;
+                }
                 Instruction::Jump(offset) => {
                     self.ip += offset;
                 }
