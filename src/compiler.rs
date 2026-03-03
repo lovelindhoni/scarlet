@@ -239,6 +239,11 @@ impl<'a> Parser<'a> {
         let then_jump = self.chunk.instructions.len() - 1;
         self.chunk.write_instruction(Instruction::Pop, line);
         self.statement()?;
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
         self.chunk
             .write_instruction(Instruction::Jump(usize::MAX), line);
         let else_jump = self.chunk.instructions.len() - 1;
@@ -247,7 +252,6 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Else)? {
             self.statement()?;
         }
-
         self.patch_jump(else_jump)?;
 
         Ok(())
@@ -266,10 +270,6 @@ impl<'a> Parser<'a> {
             _ => return Err(CompileError::InvalidJumpPatch { index: jump_index }),
         }
         Ok(())
-    }
-
-    fn emit_jump(&mut self) -> Result<usize> {
-        Ok(self.chunk.instructions.len() - 1)
     }
 
     fn block(&mut self) -> Result<()> {
@@ -329,6 +329,9 @@ impl<'a> Parser<'a> {
 
             TokenType::BangEqual | TokenType::EqualEqual => Precedence::Equality,
 
+            TokenType::And => Precedence::And,
+            TokenType::Or => Precedence::Or,
+
             TokenType::Greater
             | TokenType::GreaterEqual
             | TokenType::Less
@@ -371,6 +374,9 @@ impl<'a> Parser<'a> {
             | TokenType::Less
             | TokenType::LessEqual => self.binary(),
 
+            TokenType::And => self.and(),
+            TokenType::Or => self.or(),
+
             _ => {
                 let prev_variant = self
                     .previous_token
@@ -381,6 +387,43 @@ impl<'a> Parser<'a> {
                 Err(CompileError::MissingInfixParser(prev_variant))
             }
         }
+    }
+
+    fn and(&mut self) -> Result<()> {
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.chunk
+            .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
+        let end_jump = self.chunk.instructions.len() - 1;
+        self.chunk.write_instruction(Instruction::Pop, line);
+        self.parse_precedence(Precedence::And)?;
+        self.patch_jump(end_jump)?;
+        Ok(())
+    }
+
+    fn or(&mut self) -> Result<()> {
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+
+        self.chunk
+            .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
+        let else_jump = self.chunk.instructions.len() - 1;
+        self.chunk
+            .write_instruction(Instruction::Jump(usize::MAX), line);
+        let end_jump = self.chunk.instructions.len() - 1;
+
+        self.patch_jump(else_jump)?;
+        self.chunk.write_instruction(Instruction::Pop, line);
+
+        self.parse_precedence(Precedence::Or)?;
+        self.patch_jump(end_jump)?;
+        Ok(())
     }
 
     fn variable(&mut self, can_assign: bool) -> Result<()> {
