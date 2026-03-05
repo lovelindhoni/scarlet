@@ -1,5 +1,5 @@
+use rapidhash::RapidHashMap;
 use slotmap::{DefaultKey, SlotMap};
-use std::collections::hash_map::HashMap;
 
 use crate::common::Value;
 
@@ -10,16 +10,16 @@ pub enum Object {
 
 pub struct Heap {
     pub arena: SlotMap<DefaultKey, Object>,
-    pub intern_table: HashMap<String, DefaultKey>,
-    pub globals: HashMap<String, Value>,
+    pub intern_table: RapidHashMap<String, DefaultKey>,
+    pub globals: RapidHashMap<String, Value>,
 }
 
 impl Heap {
     pub fn new() -> Self {
         Self {
             arena: SlotMap::new(),
-            intern_table: HashMap::new(),
-            globals: HashMap::new(),
+            intern_table: RapidHashMap::default(),
+            globals: RapidHashMap::default(),
         }
     }
 }

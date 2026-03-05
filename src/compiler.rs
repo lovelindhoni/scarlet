@@ -575,6 +575,10 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+    // fn get_previous_token_variant_and_line(&self) -> Result<(TokenType, usize)> {
+    //     let (variant, line) = self.previous_token.as_ref().ok_or(CompileError::MissingPreviousToken)?.line;
+    // }
+
     fn resolve_local(&self, compiler: &Compiler, token: &Token) -> Result<Option<usize>> {
         for (idx, local) in compiler.locals.iter().enumerate().rev() {
             if self.identifiers_equal(token, &local.token) {

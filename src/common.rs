@@ -1,4 +1,5 @@
 use crate::{
+    chunk::Chunk,
     error::{HeapError, RuntimeError},
     heap::{Heap, Object},
 };
@@ -6,7 +7,7 @@ use slotmap::DefaultKey;
 
 type Result<T> = std::result::Result<T, RuntimeError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum Value {
     Number(f64),
     Boolean(bool),
@@ -15,7 +16,14 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn add(self, right_operand: Value, line: u64, heap: &mut Heap) -> Result<Value> {
+    //TODO: might want to inline all these methods
+    pub fn add(
+        self,
+        right_operand: Value,
+        chunk: &Chunk,
+        ip: usize,
+        heap: &mut Heap,
+    ) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Number(left_num + right_num))
@@ -59,71 +67,70 @@ impl Value {
                 }
             }
             _ => Err(RuntimeError::TypeError {
-                line,
+                line: chunk.get_line(ip),
                 message: String::from(
                     "Both of the operands need to be either numbers or strings for addition",
                 ),
             }),
         }
     }
-    pub fn subtract(self, right_operand: Value, line: u64) -> Result<Value> {
+    pub fn subtract(self, right_operand: Value, chunk: &Chunk, ip: usize) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Number(left_num - right_num))
             }
             _ => Err(RuntimeError::TypeError {
-                line,
+                line: chunk.get_line(ip),
                 message: String::from("The operands need to be numbers for subtraction"),
             }),
         }
     }
-    pub fn multiply(self, right_operand: Value, line: u64) -> Result<Value> {
+    pub fn multiply(self, right_operand: Value, chunk: &Chunk, ip: usize) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Number(left_num * right_num))
             }
             _ => Err(RuntimeError::TypeError {
-                line,
+                line: chunk.get_line(ip),
                 message: String::from("The operands need to be numbers for multiplication"),
             }),
         }
     }
-    pub fn modulo(self, right_operand: Value, line: u64) -> Result<Value> {
+    pub fn modulo(self, right_operand: Value, chunk: &Chunk, ip: usize) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Number(left_num % right_num))
             }
             _ => Err(RuntimeError::TypeError {
-                line,
+                line: chunk.get_line(ip),
                 message: String::from("The operands need to be numbers for modulus"),
             }),
         }
     }
-    pub fn greater(self, right_operand: Value, line: u64) -> Result<Value> {
+    pub fn greater(self, right_operand: Value, chunk: &Chunk, ip: usize) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Boolean(left_num > right_num))
             }
             _ => Err(RuntimeError::TypeError {
-                line,
+                line: chunk.get_line(ip),
                 message: String::from(
                     "Greater than(>) comparison can only be done between numbers",
                 ),
             }),
         }
     }
-    pub fn less(self, right_operand: Value, line: u64) -> Result<Value> {
+    pub fn less(self, right_operand: Value, chunk: &Chunk, ip: usize) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 Ok(Value::Boolean(left_num < right_num))
             }
             _ => Err(RuntimeError::TypeError {
-                line,
+                line: chunk.get_line(ip),
                 message: String::from("Lesser than(<) comparison can only be done between numbers"),
             }),
         }
     }
-
     pub fn equal(self, right_operand: Value) -> Result<Value> {
         Ok(match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
@@ -139,12 +146,12 @@ impl Value {
             _ => Value::Boolean(false),
         })
     }
-    pub fn divide(self, right_operand: Value, line: u64) -> Result<Value> {
+    pub fn divide(self, right_operand: Value, chunk: &Chunk, ip: usize) -> Result<Value> {
         match (self, right_operand) {
             (Value::Number(left_num), Value::Number(right_num)) => {
                 if right_num == 0.0 {
                     Err(RuntimeError::DivisionByZero {
-                        line,
+                        line: chunk.get_line(ip),
                         left_num,
                         right_num,
                     })
@@ -153,22 +160,22 @@ impl Value {
                 }
             }
             _ => Err(RuntimeError::TypeError {
-                line,
+                line: chunk.get_line(ip),
                 message: String::from("The operands need to be numbers for division"),
             }),
         }
     }
-    pub fn not(self, line: u64) -> Result<Value> {
+    pub fn not(self, chunk: &Chunk, ip: usize) -> Result<Value> {
         match self {
             Value::Nil => Ok(Value::Boolean(true)),
             Value::Boolean(boolean) => Ok(Value::Boolean(!boolean)),
             _ => Err(RuntimeError::TypeError {
-                line,
+                line: chunk.get_line(ip),
                 message: String::from("Logical Not(!) can only be done on Nil and Boolean values"),
             }),
         }
     }
-    pub fn negate(&mut self, line: u64) -> Result<()> {
+    pub fn negate(&mut self, chunk: &Chunk, ip: usize) -> Result<()> {
         match self {
             Value::Number(num) => {
                 *num = -*num;
@@ -176,7 +183,7 @@ impl Value {
             }
             _ => Err(RuntimeError::TypeError {
                 message: String::from("Only numbers can be negated"),
-                line,
+                line: chunk.get_line(ip),
             }),
         }
     }

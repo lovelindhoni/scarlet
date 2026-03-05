@@ -7,14 +7,18 @@ mod scanner;
 mod trace;
 mod vm;
 
+use mimalloc::MiMalloc;
 use std::fs;
 use std::process;
 
 use crate::chunk::Chunk;
 use crate::compiler::compile;
 use crate::heap::Heap;
-use crate::trace::diassemble;
+// use crate::trace::diassemble;
 use crate::vm::VirtualMachine;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
     let source = match fs::read("./main.cia") {
@@ -36,10 +40,10 @@ fn main() {
         }
     };
 
-    if let Err(e) = diassemble(&chunk) {
-        eprintln!("Trace Error: {}", e);
-        process::exit(1);
-    }
+    // if let Err(e) = diassemble(&chunk) {
+    //     eprintln!("Trace Error: {}", e);
+    //     process::exit(1);
+    // }
 
     let mut vm = VirtualMachine::new();
     if let Err(e) = vm.interpret(&chunk, &mut heap) {
