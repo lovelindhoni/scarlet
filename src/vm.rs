@@ -12,13 +12,15 @@ type Result<T> = std::result::Result<T, InterpretError>;
 struct CallFrame {
     ip: usize,
     function: DefaultKey,
+    chunk: *const Chunk,
     slot_start: usize,
 }
 
 impl CallFrame {
-    pub fn new(ip: usize, function: DefaultKey, slot_start: usize) -> Self {
+    pub fn new(ip: usize, function: DefaultKey, chunk: *const Chunk, slot_start: usize) -> Self {
         Self {
             ip,
+            chunk,
             function,
             slot_start,
         }
@@ -39,28 +41,9 @@ impl<'a> VirtualMachine<'a> {
             heap: None,
         }
     }
-    #[inline(always)]
-    fn get_current_chunk(&self) -> &Chunk {
-        let frame = self.frames.last().expect("No frames on stack");
-        let heap = self.heap.as_ref().expect("Heap not initialized");
-        match heap
-            .arena
-            .get(frame.function)
-            .expect("Function missing from arena")
-        {
-            Object::Function(function) => &function.chunk,
-            _ => unreachable!("CallFrame pointed to non-function object"),
-        }
-    }
-    #[inline(always)]
-    fn get_mut_top_frame(&mut self) -> &mut CallFrame {
-        self.frames.last_mut().unwrap()
-    }
-    #[inline(always)]
-    fn get_top_frame(&self) -> &CallFrame {
-        self.frames.last().unwrap()
-    }
-
+    // pub fn push_call_frame(&self, frame: CallFrame) {
+    //     self.frames.push(call)
+    // }
     #[inline]
     fn call(&mut self, function_key: DefaultKey, arg_count: usize) -> Result<()> {
         let heap = self.heap.as_ref().unwrap();
@@ -84,7 +67,8 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 let slot_start = self.stack.len().checked_sub(arg_count + 1).unwrap();
-                let frame = CallFrame::new(0, function_key, slot_start);
+                let chunk_ptr = &function.chunk as *const Chunk;
+                let frame = CallFrame::new(0, function_key, chunk_ptr, slot_start);
                 self.frames.push(frame);
                 Ok(())
             }
@@ -124,10 +108,14 @@ impl<'a> VirtualMachine<'a> {
 
     fn run(&mut self) -> Result<()> {
         loop {
-            let instruction = self.get_current_chunk().instructions[self.frames.last().unwrap().ip];
-            self.get_mut_top_frame().ip += 1;
+            let frame_index = self.frames.len() - 1;
+            let frame = &mut self.frames[frame_index];
 
-            let slot_start = self.frames.last().unwrap().slot_start;
+            let chunk = unsafe { &*frame.chunk };
+            let instruction = unsafe { *chunk.instructions.get_unchecked(frame.ip) };
+            frame.ip += 1;
+
+            let stack = &mut self.stack;
 
             #[cfg(feature = "trace")]
             println!("Gutting VM's stack");
@@ -142,105 +130,83 @@ impl<'a> VirtualMachine<'a> {
             }
 
             #[cfg(feature = "trace")]
-            diassemble_instruction(self.get_current_chunk(), self.get_top_frame().ip);
+            diassemble_instruction(chunk, frame.ip);
 
             match instruction {
                 Instruction::Call(arg_count) => {
                     self.call_value(arg_count)?;
                 }
                 Instruction::Loop(offset) => {
-                    self.get_mut_top_frame().ip -= offset;
+                    frame.ip -= offset;
                 }
 
                 Instruction::Jump(offset) => {
-                    self.get_mut_top_frame().ip += offset;
+                    frame.ip += offset;
                 }
 
                 Instruction::JumpIfFalse(offset) => {
-                    let is_falsey = match self.stack.last().unwrap() {
+                    let is_falsey = match stack.last().unwrap() {
                         Value::Boolean(boolean) => !*boolean,
                         Value::Nil => true,
                         _ => false,
                     };
 
                     if is_falsey {
-                        self.get_mut_top_frame().ip += offset;
+                        frame.ip += offset;
                     }
                 }
 
                 Instruction::SetLocal(pos) => {
-                    self.stack[slot_start + pos] = *self.stack.last().unwrap();
+                    stack[frame.slot_start + pos] = *stack.last().unwrap();
                 }
 
                 Instruction::GetLocal(pos) => {
-                    self.stack.push(self.stack[slot_start + pos]);
+                    stack.push(stack[frame.slot_start + pos]);
                 }
 
                 Instruction::SetGlobal(pos) => {
-                    if let Value::Object(key) = self.get_current_chunk().values[pos] {
+                    if let Value::Object(key) = chunk.values[pos] {
+                        let val = *stack.last().unwrap();
                         let heap = self.heap.as_mut().unwrap();
-                        let object = heap.arena.get(key).unwrap();
-
-                        match object {
-                            Object::String(name) => {
-                                if heap.globals.contains_key(name) {
-                                    heap.globals
-                                        .insert(name.to_owned(), *self.stack.last().unwrap());
-                                } else {
-                                    return Err(InterpretError::UndefinedVariable {
-                                        identifier: name.to_owned(),
-                                        line: self.current_line(),
-                                    });
-                                }
+                        match heap.globals.get_mut(&key) {
+                            Some(slot) => *slot = val,
+                            None => {
+                                return Err(InterpretError::UndefinedVariable {
+                                    identifier: self.key_to_string(key),
+                                    line: self.current_line(),
+                                });
                             }
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-
-                Instruction::GetGlobal(pos) => {
-                    if let Value::Object(key) = self.get_current_chunk().values[pos] {
-                        let heap = self.heap.as_ref().unwrap();
-                        let object = heap.arena.get(key).unwrap();
-
-                        match object {
-                            Object::String(name) => {
-                                if !heap.globals.contains_key(name) {
-                                    return Err(InterpretError::UndefinedVariable {
-                                        identifier: name.to_owned(),
-                                        line: self.current_line(),
-                                    });
-                                } else {
-                                    self.stack.push(heap.globals[name]);
-                                }
-                            }
-                            _ => unreachable!(),
                         }
                     }
                 }
 
                 Instruction::DefineGlobal(pos) => {
-                    if let Value::Object(key) = self.get_current_chunk().values[pos] {
-                        let heap = self.heap.as_mut().unwrap();
-                        let object = heap.arena.get(key).unwrap();
+                    if let Value::Object(key) = chunk.values[pos] {
+                        let val = stack.pop().unwrap();
+                        self.heap.as_mut().unwrap().globals.insert(key, val);
+                    }
+                }
 
-                        match object {
-                            Object::String(name) => {
-                                let value = *self.stack.last().unwrap();
-                                heap.globals.insert(name.clone(), value);
-                                self.stack.pop().unwrap();
+                Instruction::GetGlobal(pos) => {
+                    if let Value::Object(key) = chunk.values[pos] {
+                        match self.heap.as_ref().unwrap().globals.get(&key) {
+                            Some(&val) => stack.push(val),
+                            None => {
+                                return Err(InterpretError::UndefinedVariable {
+                                    identifier: self.key_to_string(key),
+                                    line: self.current_line(),
+                                });
                             }
-                            _ => unreachable!(),
                         }
                     }
                 }
 
                 Instruction::Pop => {
-                    self.stack.pop().unwrap();
+                    stack.pop().unwrap();
                 }
 
                 Instruction::Print => {
-                    let value = self.stack.pop().unwrap();
+                    let value = stack.pop().unwrap();
 
                     if let Value::Object(key) = value {
                         let object = self.heap.as_ref().unwrap().arena.get(key).unwrap();
@@ -251,19 +217,19 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::Constant(pos) => {
-                    self.stack.push(self.get_current_chunk().values[pos]);
+                    stack.push(chunk.values[pos]);
                 }
 
                 Instruction::True => {
-                    self.stack.push(Value::Boolean(true));
+                    stack.push(Value::Boolean(true));
                 }
 
                 Instruction::False => {
-                    self.stack.push(Value::Boolean(false));
+                    stack.push(Value::Boolean(false));
                 }
 
                 Instruction::Nil => {
-                    self.stack.push(Value::Nil);
+                    stack.push(Value::Nil);
                 }
 
                 Instruction::Not => {
@@ -307,14 +273,14 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::Return => {
-                    let result = self.stack.pop().unwrap();
+                    let result = stack.pop().unwrap();
                     let frame = self.frames.pop().unwrap();
                     if self.frames.is_empty() {
-                        self.stack.pop().unwrap();
+                        stack.pop().unwrap();
                         return Ok(());
                     }
-                    self.stack.truncate(frame.slot_start);
-                    self.stack.push(result);
+                    stack.truncate(frame.slot_start);
+                    stack.push(result);
                 }
             }
         }
@@ -465,7 +431,13 @@ impl<'a> VirtualMachine<'a> {
     }
     #[inline(always)]
     fn current_line(&self) -> u64 {
-        let ip = self.get_top_frame().ip - 1;
-        self.get_current_chunk().get_line(ip)
+        let ip = self.frames.last().unwrap().ip - 1;
+        unsafe { (&*self.frames.last().unwrap().chunk).get_line(ip) }
+    }
+    fn key_to_string(&self, key: DefaultKey) -> String {
+        match self.heap.as_ref().unwrap().arena.get(key) {
+            Some(Object::String(s)) => s.clone(),
+            _ => "<unknown>".to_owned(),
+        }
     }
 }

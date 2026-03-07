@@ -29,7 +29,7 @@ pub enum FunctionType {
 pub struct Heap {
     pub arena: SlotMap<DefaultKey, Object>,
     pub intern_table: RapidHashMap<String, DefaultKey>,
-    pub globals: RapidHashMap<String, Value>,
+    pub globals: RapidHashMap<DefaultKey, Value>,
 }
 
 impl Heap {

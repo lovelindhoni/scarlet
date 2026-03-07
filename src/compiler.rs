@@ -716,7 +716,7 @@ impl<'a> Parser<'a> {
 
     fn named_variable(&mut self, token: Token, can_assign: bool) -> Result<()> {
         let line = token.line;
-        if let Some(idx) = self.resolve_local(&self.current_compiler(), &token)? {
+        if let Some(idx) = self.resolve_local(self.current_compiler(), &token)? {
             if can_assign && self.match_token(TokenType::Equal)? {
                 self.expression()?;
                 self.current_chunk()
@@ -992,8 +992,7 @@ impl<'a> Parser<'a> {
     }
     pub fn new(source: Vec<u8>, compiler: Compiler, heap: &'a mut Heap) -> Self {
         let scanner = Scanner::new(source);
-        let mut compilers = Vec::new();
-        compilers.push(compiler);
+        let compilers = vec![compiler];
         Self {
             previous_token: None,
             current_token: None,
@@ -1015,7 +1014,7 @@ impl<'a> Parser<'a> {
         } else {
             return Err(CompileError::UnexpectedToken {
                 message: message.to_owned(),
-                token: token,
+                token,
             });
         }
         Ok(())
