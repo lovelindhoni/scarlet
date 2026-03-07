@@ -2,7 +2,7 @@ use slotmap::DefaultKey;
 
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
-use crate::error::{CompileError, HeapError};
+use crate::error::CompileError;
 use crate::heap::{FunctionType, Heap, Object};
 use crate::scanner::{Scanner, Token, TokenType};
 
@@ -44,7 +44,7 @@ impl Precedence {
 }
 
 pub fn compile(source: Vec<u8>, heap: &mut Heap) -> Result<DefaultKey> {
-    let compiler = Compiler::new(heap.new_function(None), FunctionType::Script); // None because the first function is script-level top
+    let compiler = Compiler::new(heap.create_function(None), FunctionType::Script); // None because the first function is script-level top
     let mut parser = Parser::new(source, compiler, heap);
     parser.advance()?;
     while !parser.match_token(TokenType::Eof)? {
@@ -109,13 +109,7 @@ impl<'a> Parser<'a> {
     }
     fn identifier_idx(&mut self, lexeme: Vec<u8>) -> usize {
         let identifier = String::from_utf8_lossy(&lexeme).to_string();
-        let key = if self.heap.intern_table.contains_key(&identifier) {
-            self.heap.intern_table[&identifier]
-        } else {
-            let interned_key = self.heap.arena.insert(Object::String(identifier.clone()));
-            self.heap.intern_table.insert(identifier, interned_key);
-            interned_key
-        };
+        let key = self.heap.create_or_intern_string(&identifier);
         self.current_chunk().add_constant(Value::Object(key))
     }
 
@@ -168,7 +162,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let compiler = Compiler::new(self.heap.new_function(function_name), function_type);
+        let compiler = Compiler::new(self.heap.create_function(function_name), function_type);
         self.compilers.push(compiler);
         self.begin_scope();
         self.consume(TokenType::LeftParen, "Expect '(' after function name")?;
@@ -766,32 +760,7 @@ impl<'a> Parser<'a> {
         let lexeme = &previous_token.lexeme;
         let trimmed_lexeme = &lexeme[1..lexeme.len() - 1];
         let string_value = String::from_utf8_lossy(trimmed_lexeme).to_string();
-        let key = if self.heap.intern_table.contains_key(&string_value) {
-            let interned_key = self.heap.intern_table[&string_value];
-            let object = self
-                .heap
-                .arena
-                .get(interned_key)
-                .ok_or(HeapError::ExpiredArenaKey)?;
-            match object {
-                Object::String(value) => {
-                    if value != &string_value {
-                        return Err(HeapError::InvalidInternedKey {
-                            expected: string_value,
-                            found: value.to_owned(),
-                        }
-                        .into());
-                    }
-                }
-                _ => unreachable!(),
-            }
-            interned_key
-        } else {
-            let interned_key = self.heap.arena.insert(Object::String(string_value.clone()));
-            self.heap.intern_table.insert(string_value, interned_key);
-            interned_key
-        };
-
+        let key = self.heap.create_or_intern_string(&string_value);
         let line = previous_token.line;
         let constant_idx = self.current_chunk().add_constant(Value::Object(key));
         self.current_chunk()

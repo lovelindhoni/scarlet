@@ -112,6 +112,9 @@ pub enum InterpretError {
 
     #[error("{msg}",msg = interpet_error_helper(format!("Undefined variable '{}'", .identifier).as_str(), .line))]
     UndefinedVariable { identifier: String, line: u64 },
+
+    #[error("{msg}",msg = interpet_error_helper(.message, .line))]
+    NativeFunctionError { message: String, line: u64 },
 }
 
 fn interpet_error_helper(message: &str, line: &u64) -> String {

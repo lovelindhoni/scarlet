@@ -3,6 +3,7 @@ mod common;
 mod compiler;
 mod error;
 mod heap;
+mod native_fns;
 mod scanner;
 mod trace;
 mod vm;

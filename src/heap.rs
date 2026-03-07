@@ -3,10 +3,13 @@ use slotmap::{DefaultKey, SlotMap};
 
 use crate::{chunk::Chunk, common::Value};
 
+pub type NativeFn = fn(args: &[Value], heap: &mut Heap) -> Result<Value, String>;
+
 #[derive(Debug)]
 pub enum Object {
     String(String),
     Function(ObjFunction),
+    NativeFunction(NativeFn),
 }
 
 #[derive(Debug)]
@@ -40,20 +43,29 @@ impl Heap {
             globals: RapidHashMap::default(),
         }
     }
-    pub fn new_function(&mut self, name: Option<String>) -> DefaultKey {
+    pub fn create_function(&mut self, name: Option<String>) -> DefaultKey {
         let function_name = if let Some(name) = name {
-            if self.intern_table.contains_key(&name) {
-                Some(self.intern_table[&name])
-            } else {
-                let key = self.arena.insert(Object::String(name.clone()));
-                self.intern_table.insert(name, key);
-                Some(key)
-            }
+            Some(self.create_or_intern_string(&name))
         } else {
             None
         };
         let function = Object::Function(ObjFunction::new(0, Chunk::new("Function"), function_name));
         self.arena.insert(function)
+    }
+
+    pub fn create_native_function(&mut self, function: NativeFn) -> DefaultKey {
+        let object = Object::NativeFunction(function);
+        self.arena.insert(object)
+    }
+
+    pub fn create_or_intern_string(&mut self, string: &str) -> DefaultKey {
+        if let Some(&key) = self.intern_table.get(string) {
+            key
+        } else {
+            let key = self.arena.insert(Object::String(string.into()));
+            self.intern_table.insert(string.into(), key);
+            key
+        }
     }
 
     pub fn concatenate_strings(
@@ -65,20 +77,12 @@ impl Heap {
             Some(Object::String(value)) => value,
             _ => unreachable!(),
         };
-
         let right_str = match self.arena.get(right_key) {
             Some(Object::String(value)) => value,
             _ => unreachable!(),
         };
-
         let result_str = format!("{}{}", left_str, right_str);
 
-        if let Some(&existing_key) = self.intern_table.get(&result_str) {
-            existing_key
-        } else {
-            let new_key = self.arena.insert(Object::String(result_str.clone()));
-            self.intern_table.insert(result_str, new_key);
-            new_key
-        }
+        self.create_or_intern_string(&result_str)
     }
 }
