@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-mimalloc = "0.1.48"
 rapidhash = "4.4.1"
 slotmap = "1.1.1"
 thiserror = "2.0.18"
@@ -13,5 +12,7 @@ thiserror = "2.0.18"
 trace = []
 
 [profile.release]
+strip = true
 lto = "fat"
+panic = "abort"
 codegen-units = 1

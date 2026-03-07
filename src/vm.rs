@@ -36,14 +36,11 @@ pub struct VirtualMachine<'a> {
 impl<'a> VirtualMachine<'a> {
     pub fn new() -> Self {
         VirtualMachine {
-            frames: Vec::new(),
-            stack: Vec::new(),
+            frames: Vec::with_capacity(64),
+            stack: Vec::with_capacity(256),
             heap: None,
         }
     }
-    // pub fn push_call_frame(&self, frame: CallFrame) {
-    //     self.frames.push(call)
-    // }
     #[inline]
     fn call(&mut self, function_key: DefaultKey, arg_count: usize) -> Result<()> {
         let heap = self.heap.as_ref().unwrap();

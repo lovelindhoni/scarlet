@@ -7,7 +7,6 @@ mod scanner;
 mod trace;
 mod vm;
 
-use mimalloc::MiMalloc;
 use std::fs;
 use std::process;
 
@@ -15,9 +14,6 @@ use crate::compiler::compile;
 use crate::heap::Heap;
 use crate::trace::diassemble;
 use crate::vm::VirtualMachine;
-
-#[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
     let source = match fs::read("./main.cia") {
