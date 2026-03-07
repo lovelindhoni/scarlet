@@ -1,9 +1,9 @@
-use std::usize;
+use slotmap::DefaultKey;
 
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::{CompileError, HeapError};
-use crate::heap::{Heap, Object};
+use crate::heap::{FunctionType, Heap, Object};
 use crate::scanner::{Scanner, Token, TokenType};
 
 type Result<T> = std::result::Result<T, CompileError>;
@@ -43,14 +43,15 @@ impl Precedence {
     }
 }
 
-pub fn compile(source: Vec<u8>, chunk: &mut Chunk, heap: &mut Heap) -> Result<()> {
-    let mut parser = Parser::new(source, chunk, heap);
+pub fn compile(source: Vec<u8>, heap: &mut Heap) -> Result<DefaultKey> {
+    let compiler = Compiler::new(heap.new_function(None), FunctionType::Script); // None because the first function is script-level top
+    let mut parser = Parser::new(source, compiler, heap);
     parser.advance()?;
     while !parser.match_token(TokenType::Eof)? {
         parser.declaration()?;
     }
-    parser.end_compiler()?;
-    Ok(())
+    let function = parser.end_compiler()?;
+    Ok(function)
 }
 
 struct Local {
@@ -65,14 +66,26 @@ impl Local {
 }
 
 struct Compiler {
+    pub function_type: FunctionType,
+    pub function: DefaultKey,
     pub locals: Vec<Local>,
     pub scope_depth: i64,
 }
 
 impl Compiler {
-    pub fn new() -> Self {
+    pub fn new(function_key: DefaultKey, function_type: FunctionType) -> Self {
+        let locals = vec![Local::new(
+            Token {
+                variant: TokenType::Nil,
+                lexeme: Vec::new(),
+                line: 0,
+            },
+            0,
+        )];
         Compiler {
-            locals: Vec::new(),
+            function: function_key,
+            function_type,
+            locals,
             scope_depth: 0,
         }
     }
@@ -82,24 +95,28 @@ struct Parser<'a> {
     previous_token: Option<Token>,
     current_token: Option<Token>,
     scanner: Scanner,
-    current: Compiler,
-    chunk: &'a mut Chunk,
+    compilers: Vec<Compiler>,
     heap: &'a mut Heap,
 }
 
 impl<'a> Parser<'a> {
+    fn current_chunk(&mut self) -> &mut Chunk {
+        let function = self.current_compiler().function;
+        match self.heap.arena.get_mut(function).unwrap() {
+            Object::Function(function) => &mut function.chunk,
+            _ => unreachable!(),
+        }
+    }
     fn identifier_idx(&mut self, lexeme: Vec<u8>) -> usize {
         let identifier = String::from_utf8_lossy(&lexeme).to_string();
         let key = if self.heap.intern_table.contains_key(&identifier) {
             self.heap.intern_table[&identifier]
         } else {
-            let interned_key = self.heap.arena.insert(Object::String {
-                value: identifier.clone(),
-            });
+            let interned_key = self.heap.arena.insert(Object::String(identifier.clone()));
             self.heap.intern_table.insert(identifier, interned_key);
             interned_key
         };
-        self.chunk.add_constant(Value::Object(key))
+        self.current_chunk().add_constant(Value::Object(key))
     }
 
     pub fn match_token(&mut self, token_variant: TokenType) -> Result<bool> {
@@ -119,6 +136,9 @@ impl<'a> Parser<'a> {
             == token_variant)
     }
     pub fn declaration(&mut self) -> Result<()> {
+        if self.match_token(TokenType::Fun)? {
+            self.fun_declaration()?;
+        }
         if self.match_token(TokenType::Let)? {
             self.let_declaration()?;
         } else {
@@ -126,10 +146,97 @@ impl<'a> Parser<'a> {
         }
         Ok(())
     }
+    fn fun_declaration(&mut self) -> Result<()> {
+        let function_name = self.parse_variable("Expect function name")?;
+        self.mark_intialized()?;
+        self.function(FunctionType::Function)?;
+        self.define_variable(function_name)?;
+        Ok(())
+    }
+    fn function(&mut self, function_type: FunctionType) -> Result<()> {
+        let function_name = if let FunctionType::Function = function_type {
+            Some(
+                String::from_utf8_lossy(
+                    &self
+                        .previous_token
+                        .as_ref()
+                        .ok_or(CompileError::MissingPreviousToken)?
+                        .lexeme,
+                )
+                .to_string(),
+            )
+        } else {
+            None
+        };
+        let compiler = Compiler::new(self.heap.new_function(function_name), function_type);
+        self.compilers.push(compiler);
+        self.begin_scope();
+        self.consume(TokenType::LeftParen, "Expect '(' after function name")?;
+        if !self.check(TokenType::RightParen)? {
+            loop {
+                match self
+                    .heap
+                    .arena
+                    .get_mut(self.current_compiler().function)
+                    .unwrap()
+                {
+                    Object::Function(function) => {
+                        function.arity += 1;
+                    }
+                    _ => unreachable!(),
+                }
+
+                let parameter = self.parse_variable("Expect parameter name")?;
+                self.define_variable(parameter)?;
+
+                if !self.match_token(TokenType::Comma)? {
+                    break;
+                }
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after parameters")?;
+        self.consume(TokenType::LeftBrace, "Expect '{' before function body")?;
+        self.block()?;
+        let function = self.end_compiler()?;
+        let idx = self.current_chunk().add_constant(Value::Object(function));
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.current_chunk()
+            .write_instruction(Instruction::Constant(idx), line);
+        Ok(())
+    }
+    fn return_statement(&mut self) -> Result<()> {
+        if let FunctionType::Script = self.current_compiler().function_type {
+            return Err(CompileError::ReturnFromTopLevel {
+                token: self
+                    .previous_token
+                    .as_ref()
+                    .ok_or(CompileError::MissingPreviousToken)?
+                    .to_owned(),
+            });
+        }
+        if self.match_token(TokenType::Semicolon)? {
+            self.emit_return()?;
+        } else {
+            self.expression()?;
+            self.consume(TokenType::Semicolon, "Expect ';' after return value")?;
+            let line = self
+                .previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .line;
+            self.current_chunk()
+                .write_instruction(Instruction::Return, line);
+        }
+        Ok(())
+    }
     fn parse_variable(&mut self, message: &str) -> Result<usize> {
         self.consume(TokenType::Identifier, message)?;
         self.declare_variable()?;
-        if self.current.scope_depth > 0 {
+        if self.current_compiler().scope_depth > 0 {
             Ok(0)
         } else {
             let previous = self
@@ -141,13 +248,13 @@ impl<'a> Parser<'a> {
     }
     fn declare_variable(&mut self) -> Result<()> {
         // only for local variables
-        if self.current.scope_depth > 0 {
+        if self.current_compiler().scope_depth > 0 {
             let token = self
                 .previous_token
                 .to_owned()
                 .ok_or(CompileError::MissingPreviousToken)?;
-            for local in self.current.locals.iter().rev() {
-                if local.depth != -1 && local.depth < self.current.scope_depth {
+            for local in self.current_compiler().locals.iter().rev() {
+                if local.depth != -1 && local.depth < self.current_compiler().scope_depth {
                     break;
                 }
                 if self.identifiers_equal(&token, &local.token) {
@@ -166,17 +273,21 @@ impl<'a> Parser<'a> {
         a.lexeme == b.lexeme
     }
     fn add_local(&mut self, token: Token) {
-        self.current.locals.push(Local::new(token, -1));
+        self.compilers
+            .last_mut()
+            .unwrap()
+            .locals
+            .push(Local::new(token, -1));
     }
     fn define_variable(&mut self, global: usize) -> Result<()> {
-        if self.current.scope_depth == 0 {
+        if self.current_compiler().scope_depth == 0 {
             // only for global variables
             let line = self
                 .previous_token
                 .as_ref()
                 .ok_or(CompileError::MissingPreviousToken)?
                 .line;
-            self.chunk
+            self.current_chunk()
                 .write_instruction(Instruction::DefineGlobal(global), line);
         } else {
             self.mark_intialized()?;
@@ -184,11 +295,15 @@ impl<'a> Parser<'a> {
         Ok(())
     }
     fn mark_intialized(&mut self) -> Result<()> {
-        self.current
-            .locals
-            .last_mut()
-            .ok_or(CompileError::LocalsEmpty)?
-            .depth = self.current.scope_depth;
+        if self.current_compiler().scope_depth != 0 {
+            self.compilers
+                .last_mut()
+                .unwrap()
+                .locals
+                .last_mut()
+                .ok_or(CompileError::LocalsEmpty)?
+                .depth = self.current_compiler().scope_depth;
+        }
         Ok(())
     }
     fn let_declaration(&mut self) -> Result<()> {
@@ -201,7 +316,8 @@ impl<'a> Parser<'a> {
                 .as_ref()
                 .ok_or(CompileError::MissingPreviousToken)?
                 .line;
-            self.chunk.write_instruction(Instruction::Nil, line);
+            self.current_chunk()
+                .write_instruction(Instruction::Nil, line);
         }
         self.consume(
             TokenType::Semicolon,
@@ -215,6 +331,8 @@ impl<'a> Parser<'a> {
             self.print_statement()?;
         } else if self.match_token(TokenType::If)? {
             self.if_statement()?;
+        } else if self.match_token(TokenType::Return)? {
+            self.return_statement()?;
         } else if self.match_token(TokenType::While)? {
             self.while_statement()?;
         } else if self.match_token(TokenType::For)? {
@@ -239,7 +357,7 @@ impl<'a> Parser<'a> {
             self.expression_statement()?;
         }
 
-        let mut loop_start = self.chunk.instructions.len();
+        let mut loop_start = self.current_chunk().instructions.len();
         let mut exit_jump: Option<usize> = None;
 
         if !self.match_token(TokenType::Semicolon)? {
@@ -252,12 +370,13 @@ impl<'a> Parser<'a> {
                 .ok_or(CompileError::MissingPreviousToken)?
                 .line;
 
-            self.chunk
+            self.current_chunk()
                 .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
 
-            exit_jump = Some(self.chunk.instructions.len() - 1);
+            exit_jump = Some(self.current_chunk().instructions.len() - 1);
 
-            self.chunk.write_instruction(Instruction::Pop, line);
+            self.current_chunk()
+                .write_instruction(Instruction::Pop, line);
         }
 
         if !self.match_token(TokenType::RightParen)? {
@@ -267,15 +386,16 @@ impl<'a> Parser<'a> {
                 .ok_or(CompileError::MissingPreviousToken)?
                 .line;
 
-            self.chunk
+            self.current_chunk()
                 .write_instruction(Instruction::Jump(usize::MAX), line);
 
-            let body_jump = self.chunk.instructions.len() - 1;
+            let body_jump = self.current_chunk().instructions.len() - 1;
 
-            let increment_start = self.chunk.instructions.len();
+            let increment_start = self.current_chunk().instructions.len();
 
             self.expression()?;
-            self.chunk.write_instruction(Instruction::Pop, line);
+            self.current_chunk()
+                .write_instruction(Instruction::Pop, line);
 
             self.consume(TokenType::RightParen, "Expect ')' after for clauses.")?;
 
@@ -299,14 +419,15 @@ impl<'a> Parser<'a> {
                 .ok_or(CompileError::MissingPreviousToken)?
                 .line;
 
-            self.chunk.write_instruction(Instruction::Pop, line);
+            self.current_chunk()
+                .write_instruction(Instruction::Pop, line);
         }
 
         self.end_scope()?;
         Ok(())
     }
     fn while_statement(&mut self) -> Result<()> {
-        let loop_start = self.chunk.instructions.len();
+        let loop_start = self.current_chunk().instructions.len();
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'")?;
         self.expression()?;
         self.consume(
@@ -318,14 +439,16 @@ impl<'a> Parser<'a> {
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        self.chunk
+        self.current_chunk()
             .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
-        let exit_jump = self.chunk.instructions.len() - 1;
-        self.chunk.write_instruction(Instruction::Pop, line);
+        let exit_jump = self.current_chunk().instructions.len() - 1;
+        self.current_chunk()
+            .write_instruction(Instruction::Pop, line);
         self.statement()?;
         self.emit_loop(loop_start)?;
         self.patch_jump(exit_jump)?;
-        self.chunk.write_instruction(Instruction::Pop, line);
+        self.current_chunk()
+            .write_instruction(Instruction::Pop, line);
         Ok(())
     }
     fn emit_loop(&mut self, loop_start: usize) -> Result<()> {
@@ -334,8 +457,8 @@ impl<'a> Parser<'a> {
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        let offset = self.chunk.instructions.len() - loop_start + 1;
-        self.chunk
+        let offset = self.current_chunk().instructions.len() - loop_start + 1;
+        self.current_chunk()
             .write_instruction(Instruction::Loop(offset), line);
         Ok(())
     }
@@ -349,21 +472,23 @@ impl<'a> Parser<'a> {
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        self.chunk
+        self.current_chunk()
             .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
-        let then_jump = self.chunk.instructions.len() - 1;
-        self.chunk.write_instruction(Instruction::Pop, line);
+        let then_jump = self.current_chunk().instructions.len() - 1;
+        self.current_chunk()
+            .write_instruction(Instruction::Pop, line);
         self.statement()?;
         let line = self
             .previous_token
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        self.chunk
+        self.current_chunk()
             .write_instruction(Instruction::Jump(usize::MAX), line);
-        let else_jump = self.chunk.instructions.len() - 1;
+        let else_jump = self.current_chunk().instructions.len() - 1;
         self.patch_jump(then_jump)?;
-        self.chunk.write_instruction(Instruction::Pop, line);
+        self.current_chunk()
+            .write_instruction(Instruction::Pop, line);
         if self.match_token(TokenType::Else)? {
             self.statement()?;
         }
@@ -373,12 +498,12 @@ impl<'a> Parser<'a> {
     }
 
     fn patch_jump(&mut self, jump_index: usize) -> Result<()> {
-        let current = self.chunk.instructions.len();
+        let current = self.current_chunk().instructions.len();
         let jump = current
             .checked_sub(jump_index + 1)
             .ok_or(CompileError::InvalidJumpPatch { index: jump_index })?;
 
-        match &mut self.chunk.instructions[jump_index] {
+        match &mut self.current_chunk().instructions[jump_index] {
             Instruction::JumpIfFalse(offset) | Instruction::Jump(offset) => {
                 *offset = jump;
             }
@@ -395,12 +520,12 @@ impl<'a> Parser<'a> {
         Ok(())
     }
     fn begin_scope(&mut self) {
-        self.current.scope_depth += 1;
+        self.compilers.last_mut().unwrap().scope_depth += 1;
     }
     fn end_scope(&mut self) -> Result<()> {
-        self.current.scope_depth -= 1;
-        while let Some(local) = self.current.locals.last() {
-            if local.depth <= self.current.scope_depth {
+        self.compilers.last_mut().unwrap().scope_depth -= 1;
+        while let Some(local) = self.current_compiler().locals.last() {
+            if local.depth <= self.current_compiler().scope_depth {
                 break;
             }
             let line = self
@@ -409,8 +534,9 @@ impl<'a> Parser<'a> {
                 .ok_or(CompileError::MissingPreviousToken)?
                 .line;
 
-            self.chunk.write_instruction(Instruction::Pop, line);
-            self.current.locals.pop();
+            self.current_chunk()
+                .write_instruction(Instruction::Pop, line);
+            self.compilers.last_mut().unwrap().locals.pop();
         }
 
         Ok(())
@@ -423,7 +549,8 @@ impl<'a> Parser<'a> {
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        self.chunk.write_instruction(Instruction::Pop, line);
+        self.current_chunk()
+            .write_instruction(Instruction::Pop, line);
         Ok(())
     }
     fn print_statement(&mut self) -> Result<()> {
@@ -434,7 +561,8 @@ impl<'a> Parser<'a> {
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        self.chunk.write_instruction(Instruction::Print, line);
+        self.current_chunk()
+            .write_instruction(Instruction::Print, line);
         Ok(())
     }
     fn get_rule_precedence(&self, token_variant: TokenType) -> Precedence {
@@ -446,6 +574,8 @@ impl<'a> Parser<'a> {
 
             TokenType::And => Precedence::And,
             TokenType::Or => Precedence::Or,
+
+            TokenType::LeftParen => Precedence::Call,
 
             TokenType::Greater
             | TokenType::GreaterEqual
@@ -492,6 +622,8 @@ impl<'a> Parser<'a> {
             TokenType::And => self.and(),
             TokenType::Or => self.or(),
 
+            TokenType::LeftParen => self.call(),
+
             _ => {
                 let prev_variant = self
                     .previous_token
@@ -504,16 +636,47 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn call(&mut self) -> Result<()> {
+        let arg_count = self.argument_list()?;
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.current_chunk()
+            .write_instruction(Instruction::Call(arg_count), line);
+        Ok(())
+    }
+
+    fn argument_list(&mut self) -> Result<usize> {
+        let mut arg_count = 0;
+        if !self.check(TokenType::RightParen)? {
+            loop {
+                self.expression()?;
+                arg_count += 1;
+                if !self.match_token(TokenType::Comma)? {
+                    break;
+                }
+            }
+        }
+        self.consume(
+            TokenType::RightParen,
+            "Expect ')' after arguments to an function",
+        )?;
+        Ok(arg_count)
+    }
+
     fn and(&mut self) -> Result<()> {
         let line = self
             .previous_token
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        self.chunk
+        self.current_chunk()
             .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
-        let end_jump = self.chunk.instructions.len() - 1;
-        self.chunk.write_instruction(Instruction::Pop, line);
+        let end_jump = self.current_chunk().instructions.len() - 1;
+        self.current_chunk()
+            .write_instruction(Instruction::Pop, line);
         self.parse_precedence(Precedence::And)?;
         self.patch_jump(end_jump)?;
         Ok(())
@@ -526,15 +689,16 @@ impl<'a> Parser<'a> {
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
 
-        self.chunk
+        self.current_chunk()
             .write_instruction(Instruction::JumpIfFalse(usize::MAX), line);
-        let else_jump = self.chunk.instructions.len() - 1;
-        self.chunk
+        let else_jump = self.current_chunk().instructions.len() - 1;
+        self.current_chunk()
             .write_instruction(Instruction::Jump(usize::MAX), line);
-        let end_jump = self.chunk.instructions.len() - 1;
+        let end_jump = self.current_chunk().instructions.len() - 1;
 
         self.patch_jump(else_jump)?;
-        self.chunk.write_instruction(Instruction::Pop, line);
+        self.current_chunk()
+            .write_instruction(Instruction::Pop, line);
 
         self.parse_precedence(Precedence::Or)?;
         self.patch_jump(end_jump)?;
@@ -552,23 +716,23 @@ impl<'a> Parser<'a> {
 
     fn named_variable(&mut self, token: Token, can_assign: bool) -> Result<()> {
         let line = token.line;
-        if let Some(idx) = self.resolve_local(&self.current, &token)? {
+        if let Some(idx) = self.resolve_local(&self.current_compiler(), &token)? {
             if can_assign && self.match_token(TokenType::Equal)? {
                 self.expression()?;
-                self.chunk
+                self.current_chunk()
                     .write_instruction(Instruction::SetLocal(idx), line);
             } else {
-                self.chunk
+                self.current_chunk()
                     .write_instruction(Instruction::GetLocal(idx), line);
             }
         } else {
             let idx = self.identifier_idx(token.lexeme);
             if can_assign && self.match_token(TokenType::Equal)? {
                 self.expression()?;
-                self.chunk
+                self.current_chunk()
                     .write_instruction(Instruction::SetGlobal(idx), line);
             } else {
-                self.chunk
+                self.current_chunk()
                     .write_instruction(Instruction::GetGlobal(idx), line);
             }
         }
@@ -610,7 +774,7 @@ impl<'a> Parser<'a> {
                 .get(interned_key)
                 .ok_or(HeapError::ExpiredArenaKey)?;
             match object {
-                Object::String { value } => {
+                Object::String(value) => {
                     if value != &string_value {
                         return Err(HeapError::InvalidInternedKey {
                             expected: string_value,
@@ -619,19 +783,19 @@ impl<'a> Parser<'a> {
                         .into());
                     }
                 }
+                _ => unreachable!(),
             }
             interned_key
         } else {
-            let interned_key = self.heap.arena.insert(Object::String {
-                value: string_value.clone(),
-            });
+            let interned_key = self.heap.arena.insert(Object::String(string_value.clone()));
             self.heap.intern_table.insert(string_value, interned_key);
             interned_key
         };
 
-        let constant_idx = self.chunk.add_constant(Value::Object(key));
-        self.chunk
-            .write_instruction(Instruction::Constant(constant_idx), previous_token.line);
+        let line = previous_token.line;
+        let constant_idx = self.current_chunk().add_constant(Value::Object(key));
+        self.current_chunk()
+            .write_instruction(Instruction::Constant(constant_idx), line);
 
         Ok(())
     }
@@ -640,16 +804,17 @@ impl<'a> Parser<'a> {
             .previous_token
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?;
+        let line = previous_token.line;
         match previous_token.variant {
             TokenType::True => self
-                .chunk
-                .write_instruction(Instruction::True, previous_token.line),
+                .current_chunk()
+                .write_instruction(Instruction::True, line),
             TokenType::False => self
-                .chunk
-                .write_instruction(Instruction::False, previous_token.line),
+                .current_chunk()
+                .write_instruction(Instruction::False, line),
             TokenType::Nil => self
-                .chunk
-                .write_instruction(Instruction::Nil, previous_token.line),
+                .current_chunk()
+                .write_instruction(Instruction::Nil, line),
             _ => {
                 // unreachable
             }
@@ -667,25 +832,47 @@ impl<'a> Parser<'a> {
         let rule = self.get_rule_precedence(variant);
         self.parse_precedence(rule.next())?;
         match variant {
-            TokenType::Plus => self.chunk.write_instruction(Instruction::Add, line),
-            TokenType::Minus => self.chunk.write_instruction(Instruction::Subtract, line),
-            TokenType::Star => self.chunk.write_instruction(Instruction::Multiply, line),
-            TokenType::Slash => self.chunk.write_instruction(Instruction::Divide, line),
-            TokenType::Modulo => self.chunk.write_instruction(Instruction::Modulo, line),
+            TokenType::Plus => self
+                .current_chunk()
+                .write_instruction(Instruction::Add, line),
+            TokenType::Minus => self
+                .current_chunk()
+                .write_instruction(Instruction::Subtract, line),
+            TokenType::Star => self
+                .current_chunk()
+                .write_instruction(Instruction::Multiply, line),
+            TokenType::Slash => self
+                .current_chunk()
+                .write_instruction(Instruction::Divide, line),
+            TokenType::Modulo => self
+                .current_chunk()
+                .write_instruction(Instruction::Modulo, line),
             TokenType::BangEqual => {
-                self.chunk.write_instruction(Instruction::Equal, line);
-                self.chunk.write_instruction(Instruction::Not, line);
+                self.current_chunk()
+                    .write_instruction(Instruction::Equal, line);
+                self.current_chunk()
+                    .write_instruction(Instruction::Not, line);
             }
-            TokenType::EqualEqual => self.chunk.write_instruction(Instruction::Equal, line),
-            TokenType::Greater => self.chunk.write_instruction(Instruction::Greater, line),
+            TokenType::EqualEqual => self
+                .current_chunk()
+                .write_instruction(Instruction::Equal, line),
+            TokenType::Greater => self
+                .current_chunk()
+                .write_instruction(Instruction::Greater, line),
             TokenType::GreaterEqual => {
-                self.chunk.write_instruction(Instruction::Less, line);
-                self.chunk.write_instruction(Instruction::Not, line);
+                self.current_chunk()
+                    .write_instruction(Instruction::Less, line);
+                self.current_chunk()
+                    .write_instruction(Instruction::Not, line);
             }
-            TokenType::Less => self.chunk.write_instruction(Instruction::Less, line),
+            TokenType::Less => self
+                .current_chunk()
+                .write_instruction(Instruction::Less, line),
             TokenType::LessEqual => {
-                self.chunk.write_instruction(Instruction::Greater, line);
-                self.chunk.write_instruction(Instruction::Not, line);
+                self.current_chunk()
+                    .write_instruction(Instruction::Greater, line);
+                self.current_chunk()
+                    .write_instruction(Instruction::Not, line);
             }
 
             _ => {
@@ -738,6 +925,7 @@ impl<'a> Parser<'a> {
             .previous_token
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?;
+        let line = previous_token.line;
         let value_str = str::from_utf8(&previous_token.lexeme)
             .map_err(|e| CompileError::InvalidUtf8 { source: e })?;
         let value: f64 = value_str.parse().map_err(|e| CompileError::LiteralParse {
@@ -746,9 +934,9 @@ impl<'a> Parser<'a> {
             source: e,
         })?;
 
-        let constant_idx = self.chunk.add_constant(Value::Number(value));
-        self.chunk
-            .write_instruction(Instruction::Constant(constant_idx), previous_token.line);
+        let constant_idx = self.current_chunk().add_constant(Value::Number(value));
+        self.current_chunk()
+            .write_instruction(Instruction::Constant(constant_idx), line);
         Ok(())
     }
     fn grouping(&mut self) -> Result<()> {
@@ -768,10 +956,12 @@ impl<'a> Parser<'a> {
         self.parse_precedence(Precedence::Unary)?;
         match variant {
             TokenType::Minus => {
-                self.chunk.write_instruction(Instruction::Negate, line);
+                self.current_chunk()
+                    .write_instruction(Instruction::Negate, line);
             }
             TokenType::Bang => {
-                self.chunk.write_instruction(Instruction::Not, line);
+                self.current_chunk()
+                    .write_instruction(Instruction::Not, line);
             }
             _ => {
                 // not reachable yet
@@ -783,9 +973,10 @@ impl<'a> Parser<'a> {
         self.parse_precedence(Precedence::Assignment)?;
         Ok(())
     }
-    fn end_compiler(&mut self) -> Result<()> {
+    fn end_compiler(&mut self) -> Result<DefaultKey> {
         self.emit_return()?;
-        Ok(())
+        let compiler = self.compilers.pop().unwrap();
+        Ok(compiler.function)
     }
     fn emit_return(&mut self) -> Result<()> {
         let line = self
@@ -793,20 +984,26 @@ impl<'a> Parser<'a> {
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        self.chunk.write_instruction(Instruction::Return, line);
+        self.current_chunk()
+            .write_instruction(Instruction::Nil, line);
+        self.current_chunk()
+            .write_instruction(Instruction::Return, line);
         Ok(())
     }
-    pub fn new(source: Vec<u8>, chunk: &'a mut Chunk, heap: &'a mut Heap) -> Self {
+    pub fn new(source: Vec<u8>, compiler: Compiler, heap: &'a mut Heap) -> Self {
         let scanner = Scanner::new(source);
-        let compiler = Compiler::new();
+        let mut compilers = Vec::new();
+        compilers.push(compiler);
         Self {
             previous_token: None,
             current_token: None,
-            current: compiler,
             scanner,
-            chunk,
             heap,
+            compilers,
         }
+    }
+    fn current_compiler(&self) -> &Compiler {
+        self.compilers.last().unwrap()
     }
     fn consume(&mut self, token_variant: TokenType, message: &str) -> Result<()> {
         let token = self

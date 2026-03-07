@@ -1,6 +1,9 @@
+use slotmap::DefaultKey;
+
 use crate::chunk::Chunk;
 use crate::common::Instruction;
 use crate::error::TraceError;
+use crate::heap::{Heap, Object};
 
 type Result<T> = std::result::Result<T, TraceError>;
 
@@ -55,8 +58,22 @@ fn byte_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &Instru
     );
 }
 
-pub fn diassemble(chunk: &Chunk) -> Result<()> {
-    println!("Disassembling Chunk: {}", chunk.name);
+pub fn diassemble(function_key: DefaultKey, heap: &Heap) -> Result<()> {
+    let (chunk, function_name_key) = match heap.arena.get(function_key).unwrap() {
+        Object::Function(function) => (&function.chunk, &function.name),
+        _ => unreachable!(),
+    };
+    println!(
+        "Disassembling Function: {}",
+        if let Some(function_name_key) = function_name_key {
+            match heap.arena.get(*function_name_key).unwrap() {
+                Object::String(value) => value,
+                _ => unreachable!(),
+            }
+        } else {
+            "<script>"
+        }
+    );
     if chunk.instructions.is_empty() {
         return Err(TraceError::EmptyChunk {
             name: chunk.name.clone(),
@@ -79,6 +96,9 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
     match instruction {
         Instruction::SetLocal(pos) | Instruction::GetLocal(pos) => {
             byte_instruction(idx, chunk, pos, instruction);
+        }
+        Instruction::Call(arg_count) => {
+            byte_instruction(idx, chunk, arg_count, instruction);
         }
         Instruction::Jump(offset)
         | Instruction::JumpIfFalse(offset)

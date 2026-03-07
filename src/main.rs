@@ -11,10 +11,9 @@ use mimalloc::MiMalloc;
 use std::fs;
 use std::process;
 
-use crate::chunk::Chunk;
 use crate::compiler::compile;
 use crate::heap::Heap;
-// use crate::trace::diassemble;
+use crate::trace::diassemble;
 use crate::vm::VirtualMachine;
 
 #[global_allocator]
@@ -30,9 +29,8 @@ fn main() {
     };
 
     let mut heap = Heap::new();
-    let mut chunk = Chunk::new("Master");
 
-    match compile(source, &mut chunk, &mut heap) {
+    let function = match compile(source, &mut heap) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Compile Error: {}", e);
@@ -40,13 +38,13 @@ fn main() {
         }
     };
 
-    // if let Err(e) = diassemble(&chunk) {
+    // if let Err(e) = diassemble(function, &heap) {
     //     eprintln!("Trace Error: {}", e);
     //     process::exit(1);
     // }
 
     let mut vm = VirtualMachine::new();
-    if let Err(e) = vm.interpret(&chunk, &mut heap) {
+    if let Err(e) = vm.interpret(function, &mut heap) {
         eprintln!("Runtime Error: {}", e);
         process::exit(1);
     }

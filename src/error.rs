@@ -13,28 +13,11 @@ pub enum TraceError {
 
 #[derive(Debug, Error)]
 pub enum HeapError {
-    // TODO: maybe do better debug msg, such as to include line, and the value type?
     #[error("Internal: Expired arena key")]
     ExpiredArenaKey,
 
     #[error("Internal: Invalid interned key: expected `{expected}`, found `{found:?}` in arena")]
     InvalidInternedKey { expected: String, found: String },
-}
-
-#[derive(Debug, Error)]
-pub enum RuntimeError {
-    #[error(transparent)]
-    Heap(#[from] HeapError),
-
-    #[error("Type error: {message}\n[line {line}] in script")]
-    TypeError { line: u64, message: String },
-
-    #[error("Division By Zero: {left_num}/{right_num}\n[line {line}] in script")]
-    DivisionByZero {
-        line: u64,
-        left_num: f64,
-        right_num: f64,
-    },
 }
 
 #[derive(Debug, Error)]
@@ -77,6 +60,9 @@ pub enum CompileError {
     #[error("Failed to parse literal as valid UTF-8")]
     InvalidUtf8 { source: std::str::Utf8Error },
 
+    #[error("{msg}", msg= compile_error_helper("Can't return from top level code", token))]
+    ReturnFromTopLevel { token: Token },
+
     #[error("Failed to parse literal {literal} to {to}, source: {source}")]
     LiteralParse {
         literal: String,
@@ -105,26 +91,31 @@ pub enum CompileError {
 
 #[derive(Debug, Error)]
 pub enum InterpretError {
-    #[error("Internal: VM's stack is empty")]
-    EmptyStack,
+    #[error("{msg}",msg = interpet_error_helper("Can only call functions and classes", .line))]
+    UncallableObject { line: u64 },
+
+    #[error("{msg}", msg = interpet_error_helper(.message, .line))]
+    ArgumentsCountMismatch { message: String, line: u64 },
+
+    #[error("{msg}",msg = interpet_error_helper(.message, .line))]
+    TypeError { line: u64, message: String },
+
+    #[error("{msg}",msg = interpet_error_helper(format!("Division By Zero: {}/{}", .left_num, .right_num).as_str(), .line))]
+    DivisionByZero {
+        line: u64,
+        left_num: f64,
+        right_num: f64,
+    },
 
     #[error("Invalid binary operation")]
     InvalidBinaryOp,
 
-    #[error("RuntimeError: {0}")]
-    Runtime(#[from] RuntimeError),
-
-    #[error("Internal: Chunk instance not initialized")]
-    MissingChunk,
-
-    #[error("Internal: Heap instance not initialized")]
-    MissingHeap,
-
-    #[error("Instruction pointer {ip} out of bounds (len = {len})")]
-    InvalidInstructionPointer { ip: usize, len: usize },
-
-    #[error("Undefined variable '{identifier}'\n[line {line}] in script")]
+    #[error("{msg}",msg = interpet_error_helper(format!("Undefined variable '{}'", .identifier).as_str(), .line))]
     UndefinedVariable { identifier: String, line: u64 },
+}
+
+fn interpet_error_helper(message: &str, line: &u64) -> String {
+    format!("{}\n[line {}]", message, line)
 }
 
 fn compile_error_helper(message: &str, token: &Token) -> String {
