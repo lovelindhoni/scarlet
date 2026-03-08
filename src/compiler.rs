@@ -319,9 +319,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
     fn statement(&mut self) -> Result<()> {
-        if self.match_token(TokenType::Print)? {
-            self.print_statement()?;
-        } else if self.match_token(TokenType::If)? {
+        if self.match_token(TokenType::If)? {
             self.if_statement()?;
         } else if self.match_token(TokenType::Return)? {
             self.return_statement()?;
@@ -545,18 +543,7 @@ impl<'a> Parser<'a> {
             .write_instruction(Instruction::Pop, line);
         Ok(())
     }
-    fn print_statement(&mut self) -> Result<()> {
-        self.expression()?;
-        self.consume(TokenType::Semicolon, "Expect ';' after value")?;
-        let line = self
-            .previous_token
-            .as_ref()
-            .ok_or(CompileError::MissingPreviousToken)?
-            .line;
-        self.current_chunk()
-            .write_instruction(Instruction::Print, line);
-        Ok(())
-    }
+
     fn get_rule_precedence(&self, token_variant: TokenType) -> Precedence {
         match token_variant {
             TokenType::Minus | TokenType::Plus => Precedence::Term,

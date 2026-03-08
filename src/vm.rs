@@ -209,17 +209,6 @@ impl<'a> VirtualMachine<'a> {
                     stack.pop().unwrap();
                 }
 
-                Instruction::Print => {
-                    let value = stack.pop().unwrap();
-
-                    if let Value::Object(key) = value {
-                        let object = self.heap.as_ref().unwrap().arena.get(key).unwrap();
-                        println!("{:?}", object);
-                    } else {
-                        println!("{:?}", value);
-                    }
-                }
-
                 Instruction::Constant(pos) => {
                     stack.push(chunk.values[pos]);
                 }

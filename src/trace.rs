@@ -19,7 +19,13 @@ fn simple_instruction(idx: usize, chunk: &Chunk, instruction: &Instruction) {
     println!("{:04} {:>4} {:<16}", idx, line, instruction.opcode());
 }
 
-fn constant_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &Instruction) {
+fn constant_instruction(
+    idx: usize,
+    chunk: &Chunk,
+    pos: &usize,
+    instruction: &Instruction,
+    heap: &Heap,
+) {
     let line = print_prefix(idx, chunk);
     println!(
         "{:04} {:>4} {:<16} {:4} '{:?}'",
@@ -27,7 +33,7 @@ fn constant_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &In
         line,
         instruction.opcode(),
         pos,
-        chunk.values[*pos]
+        chunk.values[*pos].display(heap)
     );
 }
 
@@ -78,12 +84,12 @@ pub fn diassemble(function_key: HeapKey, heap: &Heap) -> Result<()> {
         });
     }
     for idx in 0..chunk.instructions.len() {
-        diassemble_instruction(chunk, idx)?;
+        diassemble_instruction(chunk, idx, heap)?;
     }
     Ok(())
 }
 
-pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
+pub fn diassemble_instruction(chunk: &Chunk, idx: usize, heap: &Heap) -> Result<()> {
     let instruction = chunk
         .instructions
         .get(idx)
@@ -107,7 +113,7 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize) -> Result<()> {
         | Instruction::SetGlobal(pos)
         | Instruction::Constant(pos)
         | Instruction::DefineGlobal(pos) => {
-            constant_instruction(idx, chunk, pos, instruction);
+            constant_instruction(idx, chunk, pos, instruction, heap);
         }
         _ => {
             simple_instruction(idx, chunk, instruction);

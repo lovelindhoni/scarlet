@@ -23,24 +23,23 @@ pub fn clock(args: &[Value], _heap: &mut Heap) -> Result {
     Ok(time)
 }
 
-pub fn print_ln(args: &[Value], _heap: &mut Heap) -> Result {
+fn print_values(args: &[Value], heap: &mut Heap) {
     for (i, value) in args.iter().enumerate() {
         if i > 0 {
             print!(" ");
         }
-        print!("{:?}", value);
+        print!("{}", value.display(heap));
     }
-    println!();
+}
+
+pub fn print(args: &[Value], heap: &mut Heap) -> Result {
+    print_values(args, heap);
     Ok(Value::Nil)
 }
 
-pub fn print(args: &[Value], _heap: &mut Heap) -> Result {
-    for (i, value) in args.iter().enumerate() {
-        if i > 0 {
-            print!(" ");
-        }
-        print!("{:?}", value);
-    }
+pub fn print_ln(args: &[Value], heap: &mut Heap) -> Result {
+    print_values(args, heap);
+    println!();
     Ok(Value::Nil)
 }
 
@@ -71,9 +70,9 @@ pub fn type_of(args: &[Value], heap: &mut Heap) -> Result {
         Value::Object(key) => {
             let object = heap.arena.get(key).unwrap();
             match object {
-                Object::NativeFunction(_) => "native-function",
+                Object::NativeFunction(_) => "<native fn>",
                 Object::String(_) => "string",
-                Object::Function(_) => "function",
+                Object::Function(_) => "fn",
             }
         }
     };

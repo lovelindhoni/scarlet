@@ -1,4 +1,4 @@
-use crate::heap::HeapKey;
+use crate::heap::{Heap, HeapKey, Object};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Value {
@@ -6,6 +6,36 @@ pub enum Value {
     Boolean(bool),
     Nil,
     Object(HeapKey),
+}
+
+impl Value {
+    pub fn display(&self, heap: &Heap) -> String {
+        match self {
+            Value::Number(num) => num.to_string(),
+            Value::Boolean(boolean) => boolean.to_string(),
+            Value::Nil => "nil".to_string(),
+            Value::Object(heap_key) => {
+                let object = heap.arena.get(*heap_key).unwrap();
+                match object {
+                    Object::String(string) => string.to_owned(),
+                    Object::Function(function) => {
+                        let fn_name = if let Some(fn_name_key) = function.name {
+                            let object = heap.arena.get(fn_name_key).unwrap();
+                            if let Object::String(fn_name) = object {
+                                fn_name
+                            } else {
+                                unreachable!()
+                            }
+                        } else {
+                            "<script>"
+                        };
+                        format!("fn {}()", fn_name)
+                    }
+                    Object::NativeFunction(_) => "<native fn>".to_string(),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -34,7 +64,6 @@ pub enum Instruction {
     Equal,
     Greater,
     Less,
-    Print,
     Pop,
 }
 
@@ -71,7 +100,6 @@ impl Instruction {
             Instruction::Greater => "GREATER",
             Instruction::Less => "LESS",
 
-            Instruction::Print => "PRINT",
             Instruction::Pop => "POP",
         }
     }
