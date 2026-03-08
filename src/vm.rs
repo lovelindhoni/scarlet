@@ -1,9 +1,7 @@
-use slotmap::DefaultKey;
-
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::InterpretError;
-use crate::heap::{Heap, NativeFn, Object};
+use crate::heap::{Heap, HeapKey, NativeFn, Object};
 use crate::native_fns::{self};
 #[cfg(feature = "trace")]
 use crate::trace::diassemble_instruction;
@@ -12,13 +10,13 @@ type Result<T> = std::result::Result<T, InterpretError>;
 
 struct CallFrame {
     ip: usize,
-    function: DefaultKey,
+    function: HeapKey,
     chunk: *const Chunk,
     slot_start: usize,
 }
 
 impl CallFrame {
-    pub fn new(ip: usize, function: DefaultKey, chunk: *const Chunk, slot_start: usize) -> Self {
+    pub fn new(ip: usize, function: HeapKey, chunk: *const Chunk, slot_start: usize) -> Self {
         Self {
             ip,
             chunk,
@@ -44,7 +42,7 @@ impl<'a> VirtualMachine<'a> {
     }
     #[inline]
     // TODO: might let call_value absorb this function within itself, because it does an extra heap lookup
-    fn call(&mut self, function_key: DefaultKey, arg_count: usize) -> Result<()> {
+    fn call(&mut self, function_key: HeapKey, arg_count: usize) -> Result<()> {
         let heap = self.heap.as_ref().unwrap();
 
         match heap
@@ -122,8 +120,8 @@ impl<'a> VirtualMachine<'a> {
     fn define_native_function(&mut self, name: impl Into<String>, function: NativeFn) {
         let name: String = name.into();
         let heap = self.heap.as_mut().unwrap();
-        let name_key = heap.create_or_intern_string(&name);
-        let fn_key = heap.create_native_function(function);
+        let name_key = heap.allocate_or_intern_string(&name);
+        let fn_key = heap.allocate_native_function(function);
         let value = Value::Object(fn_key);
         heap.globals.insert(name_key, value);
     }
@@ -307,7 +305,7 @@ impl<'a> VirtualMachine<'a> {
             }
         }
     }
-    pub fn interpret(&mut self, function_key: DefaultKey, heap: &'a mut Heap) -> Result<()> {
+    pub fn interpret(&mut self, function_key: HeapKey, heap: &'a mut Heap) -> Result<()> {
         self.heap = Some(heap);
 
         self.define_native_function("print", native_fns::print);
@@ -325,7 +323,6 @@ impl<'a> VirtualMachine<'a> {
         match self.run() {
             Ok(v) => Ok(v),
             Err(err) => {
-                eprintln!("{}", err);
                 self.print_stack_trace();
                 Err(err)
             }
@@ -466,7 +463,7 @@ impl<'a> VirtualMachine<'a> {
         let ip = self.frames.last().unwrap().ip - 1;
         unsafe { (&*self.frames.last().unwrap().chunk).get_line(ip) }
     }
-    fn key_to_string(&self, key: DefaultKey) -> String {
+    fn key_to_string(&self, key: HeapKey) -> String {
         match self.heap.as_ref().unwrap().arena.get(key) {
             Some(Object::String(s)) => s.clone(),
             _ => "<unknown>".to_owned(),

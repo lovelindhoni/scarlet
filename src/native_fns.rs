@@ -77,7 +77,7 @@ pub fn type_of(args: &[Value], heap: &mut Heap) -> Result {
             }
         }
     };
-    let key = heap.create_or_intern_string(value_type);
+    let key = heap.allocate_or_intern_string(value_type);
     Ok(Value::Object(key))
 }
 
@@ -118,7 +118,7 @@ pub fn to_string(args: &[Value], heap: &mut Heap) -> Result {
         }
     };
 
-    let key = heap.create_or_intern_string(&string);
+    let key = heap.allocate_or_intern_string(&string);
     Ok(Value::Object(key))
 }
 

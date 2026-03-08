@@ -1,9 +1,7 @@
-use slotmap::DefaultKey;
-
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::CompileError;
-use crate::heap::{FunctionType, Heap, Object};
+use crate::heap::{FunctionType, Heap, HeapKey, Object};
 use crate::scanner::{Scanner, Token, TokenType};
 
 type Result<T> = std::result::Result<T, CompileError>;
@@ -43,8 +41,8 @@ impl Precedence {
     }
 }
 
-pub fn compile(source: Vec<u8>, heap: &mut Heap) -> Result<DefaultKey> {
-    let compiler = Compiler::new(heap.create_function(None), FunctionType::Script); // None because the first function is script-level top
+pub fn compile(source: Vec<u8>, heap: &mut Heap) -> Result<HeapKey> {
+    let compiler = Compiler::new(heap.allocate_function(None), FunctionType::Script); // None because the first function is script-level top
     let mut parser = Parser::new(source, compiler, heap);
     parser.advance()?;
     while !parser.match_token(TokenType::Eof)? {
@@ -67,13 +65,13 @@ impl Local {
 
 struct Compiler {
     pub function_type: FunctionType,
-    pub function: DefaultKey,
+    pub function: HeapKey,
     pub locals: Vec<Local>,
     pub scope_depth: i64,
 }
 
 impl Compiler {
-    pub fn new(function_key: DefaultKey, function_type: FunctionType) -> Self {
+    pub fn new(function_key: HeapKey, function_type: FunctionType) -> Self {
         let locals = vec![Local::new(
             Token {
                 variant: TokenType::Nil,
@@ -109,7 +107,7 @@ impl<'a> Parser<'a> {
     }
     fn identifier_idx(&mut self, lexeme: Vec<u8>) -> usize {
         let identifier = String::from_utf8_lossy(&lexeme).to_string();
-        let key = self.heap.create_or_intern_string(&identifier);
+        let key = self.heap.allocate_or_intern_string(&identifier);
         self.current_chunk().add_constant(Value::Object(key))
     }
 
@@ -162,7 +160,7 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
-        let compiler = Compiler::new(self.heap.create_function(function_name), function_type);
+        let compiler = Compiler::new(self.heap.allocate_function(function_name), function_type);
         self.compilers.push(compiler);
         self.begin_scope();
         self.consume(TokenType::LeftParen, "Expect '(' after function name")?;
@@ -760,7 +758,7 @@ impl<'a> Parser<'a> {
         let lexeme = &previous_token.lexeme;
         let trimmed_lexeme = &lexeme[1..lexeme.len() - 1];
         let string_value = String::from_utf8_lossy(trimmed_lexeme).to_string();
-        let key = self.heap.create_or_intern_string(&string_value);
+        let key = self.heap.allocate_or_intern_string(&string_value);
         let line = previous_token.line;
         let constant_idx = self.current_chunk().add_constant(Value::Object(key));
         self.current_chunk()
@@ -942,7 +940,7 @@ impl<'a> Parser<'a> {
         self.parse_precedence(Precedence::Assignment)?;
         Ok(())
     }
-    fn end_compiler(&mut self) -> Result<DefaultKey> {
+    fn end_compiler(&mut self) -> Result<HeapKey> {
         self.emit_return()?;
         let compiler = self.compilers.pop().unwrap();
         Ok(compiler.function)

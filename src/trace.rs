@@ -1,9 +1,7 @@
-use slotmap::DefaultKey;
-
 use crate::chunk::Chunk;
 use crate::common::Instruction;
 use crate::error::TraceError;
-use crate::heap::{Heap, Object};
+use crate::heap::{Heap, HeapKey, Object};
 
 type Result<T> = std::result::Result<T, TraceError>;
 
@@ -58,7 +56,7 @@ fn byte_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &Instru
     );
 }
 
-pub fn diassemble(function_key: DefaultKey, heap: &Heap) -> Result<()> {
+pub fn diassemble(function_key: HeapKey, heap: &Heap) -> Result<()> {
     let (chunk, function_name_key) = match heap.arena.get(function_key).unwrap() {
         Object::Function(function) => (&function.chunk, &function.name),
         _ => unreachable!(),

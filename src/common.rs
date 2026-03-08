@@ -1,11 +1,11 @@
-use slotmap::DefaultKey;
+use crate::heap::HeapKey;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Value {
     Number(f64),
     Boolean(bool),
     Nil,
-    Object(DefaultKey),
+    Object(HeapKey),
 }
 
 #[derive(Debug, Clone, Copy)]
