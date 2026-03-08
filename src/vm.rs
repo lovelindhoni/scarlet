@@ -1,8 +1,7 @@
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::InterpretError;
-use crate::heap::{Heap, HeapKey, NativeFn, Object};
-use crate::native_fns::{self};
+use crate::heap::{Heap, HeapKey, Object};
 #[cfg(feature = "trace")]
 use crate::trace::diassemble_instruction;
 
@@ -88,8 +87,12 @@ impl<'a> VirtualMachine<'a> {
                 Object::NativeFunction(native_function) => {
                     let stack_len = self.stack.len();
                     let args_start = stack_len - arg_count;
-                    let result = native_function(&self.stack[args_start..], heap)
-                        .map_err(|message| InterpretError::NativeFunctionError { message })?;
+                    let result = (native_function.function)(
+                        native_function.name,
+                        &self.stack[args_start..],
+                        heap,
+                    )
+                    .map_err(|message| InterpretError::NativeFunctionError { message })?;
                     self.stack.truncate(stack_len - (arg_count + 1));
                     self.stack.push(result);
                 }
@@ -101,15 +104,6 @@ impl<'a> VirtualMachine<'a> {
             return Err(InterpretError::UncallableObject);
         }
         Ok(())
-    }
-
-    fn define_native_function(&mut self, name: impl Into<String>, function: NativeFn) {
-        let name: String = name.into();
-        let heap = self.heap.as_mut().unwrap();
-        let name_key = heap.allocate_or_intern_string(&name);
-        let fn_key = heap.allocate_native_function(function);
-        let value = Value::Object(fn_key);
-        heap.globals.insert(name_key, value);
     }
 
     fn run(&mut self) -> Result<()> {
@@ -280,15 +274,6 @@ impl<'a> VirtualMachine<'a> {
     }
     pub fn interpret(&mut self, function_key: HeapKey, heap: &'a mut Heap) -> Result<()> {
         self.heap = Some(heap);
-
-        self.define_native_function("print", native_fns::print);
-        self.define_native_function("print_ln", native_fns::print_ln);
-        self.define_native_function("clock", native_fns::clock);
-        self.define_native_function("sleep", native_fns::sleep);
-        self.define_native_function("type", native_fns::type_of);
-        self.define_native_function("to_string", native_fns::to_string);
-        self.define_native_function("to_number", native_fns::to_number);
-        self.define_native_function("len", native_fns::len);
 
         self.stack.push(Value::Object(function_key));
         self.call(function_key, 0)?;

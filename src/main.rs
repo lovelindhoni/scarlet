@@ -13,6 +13,7 @@ use std::process;
 
 use crate::compiler::compile;
 use crate::heap::Heap;
+use crate::native_fns::initialize_native_functions;
 use crate::trace::diassemble;
 use crate::vm::VirtualMachine;
 
@@ -39,6 +40,8 @@ fn main() {
         eprintln!("Trace Error: {}", e);
         process::exit(1);
     }
+
+    initialize_native_functions(&mut heap);
 
     let mut vm = VirtualMachine::new();
     if let Err(e) = vm.interpret(function, &mut heap) {

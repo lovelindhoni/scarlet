@@ -3,7 +3,8 @@ use slotmap::{SlotMap, new_key_type};
 
 use crate::{chunk::Chunk, common::Value};
 
-pub type NativeFn = fn(args: &[Value], heap: &mut Heap) -> Result<Value, String>;
+pub type NativeFn =
+    fn(name: &'static str, args: &[Value], heap: &mut Heap) -> Result<Value, String>;
 
 new_key_type! {
     pub struct HeapKey;
@@ -13,7 +14,7 @@ new_key_type! {
 pub enum Object {
     String(String),
     Function(ObjFunction),
-    NativeFunction(NativeFn),
+    NativeFunction(NativeObjFunction),
 }
 
 #[derive(Debug)]
@@ -21,6 +22,12 @@ pub struct ObjFunction {
     pub arity: u64,
     pub chunk: Chunk,
     pub name: Option<HeapKey>,
+}
+
+#[derive(Debug)]
+pub struct NativeObjFunction {
+    pub name: &'static str,
+    pub function: NativeFn,
 }
 
 impl ObjFunction {
@@ -59,8 +66,8 @@ impl Heap {
         self.arena.insert(function)
     }
 
-    pub fn allocate_native_function(&mut self, function: NativeFn) -> HeapKey {
-        let object = Object::NativeFunction(function);
+    pub fn allocate_native_function(&mut self, name: &'static str, function: NativeFn) -> HeapKey {
+        let object = Object::NativeFunction(NativeObjFunction { name, function });
         self.arena.insert(object)
     }
 

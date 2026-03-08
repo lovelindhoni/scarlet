@@ -1,6 +1,6 @@
 use crate::{
     common::Value,
-    heap::{Heap, Object},
+    heap::{Heap, NativeFn, Object},
 };
 
 use std::thread;
@@ -8,8 +8,31 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 type Result = std::result::Result<Value, String>;
 
-pub fn clock(args: &[Value], _heap: &mut Heap) -> Result {
-    let fn_name = "clock";
+const NATIVES: &[(&str, NativeFn)] = &[
+    ("clock", clock),
+    ("print", print),
+    ("print_ln", print_ln),
+    ("len", len),
+    ("type", type_of),
+    ("sleep", sleep),
+    ("to_string", to_string),
+    ("to_number", to_number),
+];
+
+pub fn initialize_native_functions(heap: &mut Heap) {
+    for (name, func) in NATIVES {
+        register(heap, name, *func);
+    }
+}
+
+fn register(heap: &mut Heap, name: &'static str, function: NativeFn) {
+    let name_key = heap.allocate_or_intern_string(name);
+    let fn_key = heap.allocate_native_function(name, function);
+
+    heap.globals.insert(name_key, Value::Object(fn_key));
+}
+
+fn clock(fn_name: &'static str, args: &[Value], _heap: &mut Heap) -> Result {
     check_arguments_len(0, args.len(), fn_name)?;
 
     let time = Value::Number(
@@ -32,19 +55,18 @@ fn print_values(args: &[Value], heap: &mut Heap) {
     }
 }
 
-pub fn print(args: &[Value], heap: &mut Heap) -> Result {
+fn print(_fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     print_values(args, heap);
     Ok(Value::Nil)
 }
 
-pub fn print_ln(args: &[Value], heap: &mut Heap) -> Result {
+fn print_ln(_fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     print_values(args, heap);
     println!();
     Ok(Value::Nil)
 }
 
-pub fn len(args: &[Value], heap: &mut Heap) -> Result {
-    let fn_name = "len";
+fn len(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     check_arguments_len(1, args.len(), fn_name)?;
     if let Value::Object(key) = args[0] {
         let object = heap.arena.get(key).unwrap();
@@ -59,8 +81,7 @@ pub fn len(args: &[Value], heap: &mut Heap) -> Result {
     }
 }
 
-pub fn type_of(args: &[Value], heap: &mut Heap) -> Result {
-    let fn_name = "type";
+fn type_of(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     check_arguments_len(1, args.len(), fn_name)?;
 
     let value_type = match args[0] {
@@ -70,9 +91,9 @@ pub fn type_of(args: &[Value], heap: &mut Heap) -> Result {
         Value::Object(key) => {
             let object = heap.arena.get(key).unwrap();
             match object {
-                Object::NativeFunction(_) => "<native fn>",
+                Object::NativeFunction(_) => "native-function",
                 Object::String(_) => "string",
-                Object::Function(_) => "fn",
+                Object::Function(_) => "function",
             }
         }
     };
@@ -80,8 +101,7 @@ pub fn type_of(args: &[Value], heap: &mut Heap) -> Result {
     Ok(Value::Object(key))
 }
 
-pub fn sleep(args: &[Value], _heap: &mut Heap) -> Result {
-    let fn_name = "sleep";
+fn sleep(fn_name: &'static str, args: &[Value], _heap: &mut Heap) -> Result {
     check_arguments_len(1, args.len(), fn_name)?;
 
     if let Value::Number(duration) = args[0] {
@@ -95,8 +115,7 @@ pub fn sleep(args: &[Value], _heap: &mut Heap) -> Result {
     }
 }
 
-pub fn to_string(args: &[Value], heap: &mut Heap) -> Result {
-    let fn_name = "to_string";
+fn to_string(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     check_arguments_len(1, args.len(), fn_name)?;
 
     let string = match args[0] {
@@ -121,8 +140,7 @@ pub fn to_string(args: &[Value], heap: &mut Heap) -> Result {
     Ok(Value::Object(key))
 }
 
-pub fn to_number(args: &[Value], heap: &mut Heap) -> Result {
-    let fn_name = "to_number";
+fn to_number(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     check_arguments_len(1, args.len(), fn_name)?;
 
     let num = match args[0] {

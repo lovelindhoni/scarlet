@@ -31,7 +31,7 @@ impl Value {
                         };
                         format!("fn {}()", fn_name)
                     }
-                    Object::NativeFunction(_) => "<native fn>".to_string(),
+                    Object::NativeFunction(_) => "native-function".to_string(),
                 }
             }
         }
