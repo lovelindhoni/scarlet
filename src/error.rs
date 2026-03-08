@@ -12,15 +12,6 @@ pub enum TraceError {
 }
 
 #[derive(Debug, Error)]
-pub enum HeapError {
-    #[error("Internal: Expired arena key")]
-    ExpiredArenaKey,
-
-    #[error("Internal: Invalid interned key: expected `{expected}`, found `{found:?}` in arena")]
-    InvalidInternedKey { expected: String, found: String },
-}
-
-#[derive(Debug, Error)]
 pub enum ScanError {
     #[error("{msg}", msg = scan_error_helper(.message, .line, .lexeme))]
     UnterminatedString {
@@ -41,9 +32,6 @@ pub enum ScanError {
 pub enum CompileError {
     #[error("Syntax Error on {0}")]
     Scan(#[from] ScanError),
-
-    #[error(transparent)]
-    Heap(#[from] HeapError),
 
     #[error("Internal: Missing current token when parsing")]
     MissingCurrentToken,
@@ -91,34 +79,26 @@ pub enum CompileError {
 
 #[derive(Debug, Error)]
 pub enum InterpretError {
-    #[error("{msg}",msg = interpet_error_helper("Can only call functions and classes", .line))]
-    UncallableObject { line: u64 },
+    #[error("Can only call functions and classes")]
+    UncallableObject,
 
-    #[error("{msg}", msg = interpet_error_helper(.message, .line))]
-    ArgumentsCountMismatch { message: String, line: u64 },
+    #[error("{msg}", msg = .message)]
+    ArgumentsCountMismatch { message: String },
 
-    #[error("{msg}",msg = interpet_error_helper(.message, .line))]
-    TypeError { line: u64, message: String },
+    #[error("{msg}", msg = .message)]
+    TypeError { message: String },
 
-    #[error("{msg}",msg = interpet_error_helper(format!("Division By Zero: {}/{}", .left_num, .right_num).as_str(), .line))]
-    DivisionByZero {
-        line: u64,
-        left_num: f64,
-        right_num: f64,
-    },
+    #[error("Division By Zero: {}/{}", .left_num, .right_num)]
+    DivisionByZero { left_num: f64, right_num: f64 },
 
     #[error("Invalid binary operation")]
     InvalidBinaryOp,
 
-    #[error("{msg}",msg = interpet_error_helper(format!("Undefined variable '{}'", .identifier).as_str(), .line))]
-    UndefinedVariable { identifier: String, line: u64 },
+    #[error("Undefined variable '{}'", .identifier)]
+    UndefinedVariable { identifier: String },
 
-    #[error("{msg}",msg = interpet_error_helper(.message, .line))]
-    NativeFunctionError { message: String, line: u64 },
-}
-
-fn interpet_error_helper(message: &str, line: &u64) -> String {
-    format!("{}\n[line {}]", message, line)
+    #[error("{msg}", msg = .message)]
+    NativeFunctionError { message: String },
 }
 
 fn compile_error_helper(message: &str, token: &Token) -> String {

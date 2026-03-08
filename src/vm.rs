@@ -58,7 +58,6 @@ impl<'a> VirtualMachine<'a> {
                                 "Expected {} arguments but got {}.",
                                 function.arity, arg_count
                             ),
-                            line: self.current_line(),
                         })
                     };
                 }
@@ -69,9 +68,7 @@ impl<'a> VirtualMachine<'a> {
                 self.frames.push(frame);
                 Ok(())
             }
-            _ => Err(InterpretError::UncallableObject {
-                line: self.current_line(),
-            }),
+            _ => Err(InterpretError::UncallableObject {}),
         }
     }
 
@@ -91,28 +88,17 @@ impl<'a> VirtualMachine<'a> {
                 Object::NativeFunction(native_function) => {
                     let stack_len = self.stack.len();
                     let args_start = stack_len - arg_count;
-                    let result =
-                        native_function(&self.stack[args_start..], heap).map_err(|message| {
-                            InterpretError::NativeFunctionError {
-                                message,
-                                line: self.current_line(),
-                            }
-                        })?;
+                    let result = native_function(&self.stack[args_start..], heap)
+                        .map_err(|message| InterpretError::NativeFunctionError { message })?;
                     self.stack.truncate(stack_len - (arg_count + 1));
                     self.stack.push(result);
                 }
                 _ => {
-                    return {
-                        Err(InterpretError::UncallableObject {
-                            line: self.current_line(),
-                        })
-                    };
+                    return Err(InterpretError::UncallableObject);
                 }
             }
         } else {
-            return Err(InterpretError::UncallableObject {
-                line: self.current_line(),
-            });
+            return Err(InterpretError::UncallableObject);
         }
         Ok(())
     }
@@ -193,7 +179,6 @@ impl<'a> VirtualMachine<'a> {
                             None => {
                                 return Err(InterpretError::UndefinedVariable {
                                     identifier: self.key_to_string(key),
-                                    line: self.current_line(),
                                 });
                             }
                         }
@@ -214,7 +199,6 @@ impl<'a> VirtualMachine<'a> {
                             None => {
                                 return Err(InterpretError::UndefinedVariable {
                                     identifier: self.key_to_string(key),
-                                    line: self.current_line(),
                                 });
                             }
                         }
@@ -339,7 +323,6 @@ impl<'a> VirtualMachine<'a> {
                 _ => {
                     return Err(InterpretError::TypeError {
                         message: "Only numbers can be negated".to_string(),
-                        line: self.current_line(),
                     });
                 }
             },
@@ -369,7 +352,6 @@ impl<'a> VirtualMachine<'a> {
                 }
                 _ => {
                     return Err(InterpretError::TypeError {
-                        line: self.current_line(),
                         message: "Operands must be two numbers or two strings.".to_string(),
                     });
                 }
@@ -379,7 +361,6 @@ impl<'a> VirtualMachine<'a> {
             Instruction::Divide => {
                 if let Value::Number(0.0) = b {
                     return Err(InterpretError::DivisionByZero {
-                        line: self.current_line(),
                         left_num: match a {
                             Value::Number(n) => n,
                             _ => 0.0,
@@ -408,7 +389,6 @@ impl<'a> VirtualMachine<'a> {
         match (a, b) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Number(f(n1, n2))),
             _ => Err(InterpretError::TypeError {
-                line: self.current_line(),
                 message: "Operands must be numbers.".to_string(),
             }),
         }
@@ -422,7 +402,6 @@ impl<'a> VirtualMachine<'a> {
         match (a, b) {
             (Value::Number(n1), Value::Number(n2)) => Ok(Value::Boolean(f(n1, n2))),
             _ => Err(InterpretError::TypeError {
-                line: self.current_line(),
                 message: "Operands must be numbers for comparison.".to_string(),
             }),
         }
@@ -457,11 +436,6 @@ impl<'a> VirtualMachine<'a> {
                 }
             }
         }
-    }
-    #[inline(always)]
-    fn current_line(&self) -> u64 {
-        let ip = self.frames.last().unwrap().ip - 1;
-        unsafe { (&*self.frames.last().unwrap().chunk).get_line(ip) }
     }
     fn key_to_string(&self, key: HeapKey) -> String {
         match self.heap.as_ref().unwrap().arena.get(key) {

@@ -35,10 +35,10 @@ fn main() {
         }
     };
 
-    // if let Err(e) = diassemble(function, &heap) {
-    //     eprintln!("Trace Error: {}", e);
-    //     process::exit(1);
-    // }
+    if let Err(e) = diassemble(function, &heap) {
+        eprintln!("Trace Error: {}", e);
+        process::exit(1);
+    }
 
     let mut vm = VirtualMachine::new();
     if let Err(e) = vm.interpret(function, &mut heap) {

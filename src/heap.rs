@@ -28,6 +28,8 @@ impl ObjFunction {
         Self { arity, chunk, name }
     }
 }
+
+#[repr(u8)]
 pub enum FunctionType {
     Function,
     Script,
