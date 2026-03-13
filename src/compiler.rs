@@ -1,7 +1,7 @@
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::CompileError;
-use crate::heap::{FunctionType, Heap, HeapKey, Object};
+use crate::heap::{FunctionType, Heap, HeapKey, Object, Upvalue};
 use crate::scanner::{Scanner, Token, TokenType};
 
 type Result<T> = std::result::Result<T, CompileError>;
@@ -68,6 +68,7 @@ struct Compiler {
     pub function: HeapKey,
     pub locals: Vec<Local>,
     pub scope_depth: i64,
+    pub upvalues: Vec<Upvalue>,
 }
 
 impl Compiler {
@@ -85,6 +86,7 @@ impl Compiler {
             function_type,
             locals,
             scope_depth: 0,
+            upvalues: Vec::new(),
         }
     }
 }
@@ -196,8 +198,11 @@ impl<'a> Parser<'a> {
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
+        let upvalues =
+            std::mem::take(&mut self.compilers.last_mut().unwrap().upvalues).into_boxed_slice();
         self.current_chunk()
-            .write_instruction(Instruction::Constant(idx), line);
+            .write_instruction(Instruction::Closure(idx, upvalues), line);
+
         Ok(())
     }
     fn return_statement(&mut self) -> Result<()> {
@@ -704,6 +709,15 @@ impl<'a> Parser<'a> {
                 self.current_chunk()
                     .write_instruction(Instruction::GetLocal(idx), line);
             }
+        } else if let Some(idx) = self.resolve_upvalue(self.compilers.len() - 1, &token)? {
+            if can_assign && self.match_token(TokenType::Equal)? {
+                self.expression()?;
+                self.current_chunk()
+                    .write_instruction(Instruction::SetUpvalue(idx), line);
+            } else {
+                self.current_chunk()
+                    .write_instruction(Instruction::GetUpvalue(idx), line);
+            }
         } else {
             let idx = self.identifier_idx(token.lexeme);
             if can_assign && self.match_token(TokenType::Equal)? {
@@ -718,9 +732,38 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    // fn get_previous_token_variant_and_line(&self) -> Result<(TokenType, usize)> {
-    //     let (variant, line) = self.previous_token.as_ref().ok_or(CompileError::MissingPreviousToken)?.line;
-    // }
+    fn resolve_upvalue(&mut self, idx: usize, token: &Token) -> Result<Option<usize>> {
+        if idx == 0 {
+            Ok(None)
+        } else {
+            let enclosing = &self.compilers[idx - 1];
+            if let Some(local) = self.resolve_local(enclosing, token)? {
+                return Ok(Some(self.add_upvalue(idx, local, true)));
+            }
+            if let Some(upvalue) = self.resolve_upvalue(idx - 1, token)? {
+                return Ok(Some(self.add_upvalue(idx, upvalue, false)));
+            }
+            Ok(None)
+        }
+    }
+
+    fn add_upvalue(&mut self, compiler_idx: usize, local_idx: usize, is_local: bool) -> usize {
+        let compiler = &mut self.compilers[compiler_idx];
+        let object = self.heap.arena.get_mut(compiler.function).unwrap();
+        match object {
+            Object::Function(_) => {
+                let upvalue_count = compiler.upvalues.len();
+                for (i, upvalue) in compiler.upvalues.iter().enumerate() {
+                    if upvalue.index == local_idx && upvalue.is_local == is_local {
+                        return i;
+                    }
+                }
+                compiler.upvalues.push(Upvalue::new(local_idx, is_local));
+                upvalue_count
+            }
+            _ => unreachable!(),
+        }
+    }
 
     fn resolve_local(&self, compiler: &Compiler, token: &Token) -> Result<Option<usize>> {
         for (idx, local) in compiler.locals.iter().enumerate().rev() {

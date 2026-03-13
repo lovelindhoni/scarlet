@@ -93,7 +93,7 @@ fn type_of(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
             match object {
                 Object::NativeFunction(_) => "native-function",
                 Object::String(_) => "string",
-                Object::Function(_) => "function",
+                Object::Function(_) | Object::Closure(_) => "function",
             }
         }
     };

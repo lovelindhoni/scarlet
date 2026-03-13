@@ -10,11 +10,24 @@ new_key_type! {
     pub struct HeapKey;
 }
 
+#[derive(Debug, Clone)]
+pub struct Upvalue {
+    pub index: usize,
+    pub is_local: bool,
+}
+
+impl Upvalue {
+    pub fn new(index: usize, is_local: bool) -> Self {
+        Self { index, is_local }
+    }
+}
+
 #[derive(Debug)]
 pub enum Object {
     String(String),
     Function(ObjFunction),
     NativeFunction(NativeObjFunction),
+    Closure(ObjClosure),
 }
 
 #[derive(Debug)]
@@ -22,6 +35,11 @@ pub struct ObjFunction {
     pub arity: u64,
     pub chunk: Chunk,
     pub name: Option<HeapKey>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ObjClosure {
+    pub function: HeapKey,
 }
 
 #[derive(Debug)]
@@ -64,6 +82,12 @@ impl Heap {
         };
         let function = Object::Function(ObjFunction::new(0, Chunk::new("Function"), function_name));
         self.arena.insert(function)
+    }
+
+    pub fn allocate_closure(&mut self, function: HeapKey) -> HeapKey {
+        // takes a normal function pointer and returns a closure pointer
+        let closure = ObjClosure { function };
+        self.arena.insert(Object::Closure(closure))
     }
 
     pub fn allocate_native_function(&mut self, name: &'static str, function: NativeFn) -> HeapKey {

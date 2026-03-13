@@ -9,17 +9,17 @@ type Result<T> = std::result::Result<T, InterpretError>;
 
 struct CallFrame {
     ip: usize,
-    function: HeapKey,
+    closure: HeapKey,
     chunk: *const Chunk,
     slot_start: usize,
 }
 
 impl CallFrame {
-    pub fn new(ip: usize, function: HeapKey, chunk: *const Chunk, slot_start: usize) -> Self {
+    pub fn new(ip: usize, closure: HeapKey, chunk: *const Chunk, slot_start: usize) -> Self {
         Self {
             ip,
             chunk,
-            function,
+            closure,
             slot_start,
         }
     }
@@ -41,8 +41,14 @@ impl<'a> VirtualMachine<'a> {
     }
     #[inline]
     // TODO: might let call_value absorb this function within itself, because it does an extra heap lookup
-    fn call(&mut self, function_key: HeapKey, arg_count: usize) -> Result<()> {
+    fn call(&mut self, closure_key: HeapKey, arg_count: usize) -> Result<()> {
         let heap = self.heap.as_ref().unwrap();
+
+        let function_key = if let Object::Closure(closure) = heap.arena.get(closure_key).unwrap() {
+            closure.function
+        } else {
+            unreachable!()
+        };
 
         match heap
             .arena
@@ -63,7 +69,7 @@ impl<'a> VirtualMachine<'a> {
 
                 let slot_start = self.stack.len().checked_sub(arg_count + 1).unwrap();
                 let chunk_ptr = &function.chunk as *const Chunk;
-                let frame = CallFrame::new(0, function_key, chunk_ptr, slot_start);
+                let frame = CallFrame::new(0, closure_key, chunk_ptr, slot_start);
                 self.frames.push(frame);
                 Ok(())
             }
@@ -82,6 +88,11 @@ impl<'a> VirtualMachine<'a> {
 
             match object {
                 Object::Function(_) => {
+                    // because every user defined function is now wrapped in a closure
+                    unreachable!()
+                }
+                Object::Closure(_closure) => {
+                    // its okay to clone this here, bcoz, the objclosure doesn't have much data as of now?
                     self.call(key, arg_count)?;
                 }
                 Object::NativeFunction(native_function) => {
@@ -112,7 +123,7 @@ impl<'a> VirtualMachine<'a> {
             let frame = &mut self.frames[frame_index];
 
             let chunk = unsafe { &*frame.chunk };
-            let instruction = unsafe { *chunk.instructions.get_unchecked(frame.ip) };
+            let instruction = unsafe { &*chunk.instructions.get_unchecked(frame.ip) };
             frame.ip += 1;
 
             let stack = &mut self.stack;
@@ -133,8 +144,21 @@ impl<'a> VirtualMachine<'a> {
             diassemble_instruction(chunk, frame.ip);
 
             match instruction {
+                Instruction::Closure(pos, _upvalues) => {
+                    let value = chunk.values[*pos];
+                    if let Value::Object(function_key) = value {
+                        // The function_key should definitely point to an function_object
+                        let closure_key =
+                            self.heap.as_mut().unwrap().allocate_closure(function_key);
+                        stack.push(Value::Object(closure_key));
+                    } else {
+                        unreachable!()
+                    }
+                    // let function = self
+                }
+
                 Instruction::Call(arg_count) => {
-                    self.call_value(arg_count)?;
+                    self.call_value(*arg_count)?;
                 }
                 Instruction::Loop(offset) => {
                     frame.ip -= offset;
@@ -165,7 +189,7 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::SetGlobal(pos) => {
-                    if let Value::Object(key) = chunk.values[pos] {
+                    if let Value::Object(key) = chunk.values[*pos] {
                         let val = *stack.last().unwrap();
                         let heap = self.heap.as_mut().unwrap();
                         match heap.globals.get_mut(&key) {
@@ -180,14 +204,14 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::DefineGlobal(pos) => {
-                    if let Value::Object(key) = chunk.values[pos] {
+                    if let Value::Object(key) = chunk.values[*pos] {
                         let val = stack.pop().unwrap();
                         self.heap.as_mut().unwrap().globals.insert(key, val);
                     }
                 }
 
                 Instruction::GetGlobal(pos) => {
-                    if let Value::Object(key) = chunk.values[pos] {
+                    if let Value::Object(key) = chunk.values[*pos] {
                         match self.heap.as_ref().unwrap().globals.get(&key) {
                             Some(&val) => stack.push(val),
                             None => {
@@ -204,7 +228,7 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::Constant(pos) => {
-                    stack.push(chunk.values[pos]);
+                    stack.push(chunk.values[*pos]);
                 }
 
                 Instruction::True => {
@@ -273,10 +297,11 @@ impl<'a> VirtualMachine<'a> {
         }
     }
     pub fn interpret(&mut self, function_key: HeapKey, heap: &'a mut Heap) -> Result<()> {
-        self.heap = Some(heap);
+        let closure_key = heap.allocate_closure(function_key);
+        self.stack.push(Value::Object(closure_key));
 
-        self.stack.push(Value::Object(function_key));
-        self.call(function_key, 0)?;
+        self.heap = Some(heap);
+        self.call(closure_key, 0)?;
 
         match self.run() {
             Ok(v) => Ok(v),
@@ -394,8 +419,14 @@ impl<'a> VirtualMachine<'a> {
     fn print_stack_trace(&self) {
         let heap = self.heap.as_ref().unwrap();
         for frame in self.frames.iter().rev() {
-            let object = heap.arena.get(frame.function).unwrap();
+            let function_key =
+                if let Object::Closure(closure) = heap.arena.get(frame.closure).unwrap() {
+                    closure.function
+                } else {
+                    unreachable!()
+                };
 
+            let object = heap.arena.get(function_key).unwrap();
             if let Object::Function(function) = object {
                 let instruction = frame.ip.saturating_sub(1);
                 let line = function.chunk.get_line(instruction);

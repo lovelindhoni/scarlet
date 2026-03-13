@@ -98,7 +98,10 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize, heap: &Heap) -> Result<
             len: chunk.instructions.len(),
         })?;
     match instruction {
-        Instruction::SetLocal(pos) | Instruction::GetLocal(pos) => {
+        Instruction::SetLocal(pos)
+        | Instruction::GetLocal(pos)
+        | Instruction::SetUpvalue(pos)
+        | Instruction::GetUpvalue(pos) => {
             byte_instruction(idx, chunk, pos, instruction);
         }
         Instruction::Call(arg_count) => {
@@ -115,6 +118,28 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize, heap: &Heap) -> Result<
         | Instruction::DefineGlobal(pos) => {
             constant_instruction(idx, chunk, pos, instruction, heap);
         }
+
+        Instruction::Closure(pos, upvalues) => {
+            let line = print_prefix(idx, chunk);
+
+            println!(
+                "{:04} {:>4} {:<16} {:4} '{:?}'",
+                idx,
+                line,
+                instruction.opcode(),
+                pos,
+                chunk.values[*pos].display(heap)
+            );
+            for (i, upvalue) in upvalues.iter().enumerate() {
+                let location = if upvalue.is_local { "local" } else { "upvalue" };
+
+                println!(
+                    "      |                     {:<8} {:4} (slot {})",
+                    location, upvalue.index, i
+                );
+            }
+        }
+
         _ => {
             simple_instruction(idx, chunk, instruction);
         }

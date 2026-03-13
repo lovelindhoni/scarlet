@@ -1,4 +1,4 @@
-use crate::heap::{Heap, HeapKey, Object};
+use crate::heap::{Heap, HeapKey, ObjFunction, Object, Upvalue};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Value {
@@ -9,6 +9,20 @@ pub enum Value {
 }
 
 impl Value {
+    fn print_function(&self, function: &ObjFunction, heap: &Heap) -> String {
+        let fn_name = if let Some(fn_name_key) = function.name {
+            let object = heap.arena.get(fn_name_key).unwrap();
+            if let Object::String(fn_name) = object {
+                fn_name
+            } else {
+                unreachable!()
+            }
+        } else {
+            "<script>"
+        };
+
+        format!("fn {}()", fn_name)
+    }
     pub fn display(&self, heap: &Heap) -> String {
         match self {
             Value::Number(num) => num.to_string(),
@@ -18,27 +32,26 @@ impl Value {
                 let object = heap.arena.get(*heap_key).unwrap();
                 match object {
                     Object::String(string) => string.to_owned(),
-                    Object::Function(function) => {
-                        let fn_name = if let Some(fn_name_key) = function.name {
-                            let object = heap.arena.get(fn_name_key).unwrap();
-                            if let Object::String(fn_name) = object {
-                                fn_name
-                            } else {
-                                unreachable!()
-                            }
+                    Object::Function(function) => self.print_function(function, heap),
+                    Object::Closure(closure) => {
+                        if let Object::Function(function) =
+                            heap.arena.get(closure.function).unwrap()
+                        {
+                            self.print_function(function, heap)
                         } else {
-                            "<script>"
-                        };
-                        format!("fn {}()", fn_name)
+                            unreachable!() // hopefully :|
+                        }
                     }
-                    Object::NativeFunction(_) => "native-function".to_string(),
+                    Object::NativeFunction(native_function) => {
+                        format!("fn {}()", native_function.name)
+                    }
                 }
             }
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Instruction {
     Constant(usize),
     DefineGlobal(usize),
@@ -50,6 +63,9 @@ pub enum Instruction {
     Jump(usize),
     Loop(usize),
     Call(usize),
+    Closure(usize, Box<[Upvalue]>),
+    SetUpvalue(usize),
+    GetUpvalue(usize),
     True,
     False,
     Nil,
@@ -77,11 +93,15 @@ impl Instruction {
             Instruction::GetLocal(_) => "GET_LOCAL",
             Instruction::SetLocal(_) => "SET_LOCAL",
 
+            Instruction::GetUpvalue(_) => "GET_UPVALUE",
+            Instruction::SetUpvalue(_) => "SET_UPVALUE",
+
             Instruction::Jump(_) => "JUMP",
             Instruction::JumpIfFalse(_) => "JUMP_IF_FALSE",
             Instruction::Loop(_) => "LOOP",
 
             Instruction::Call(_) => "CALL",
+            Instruction::Closure(_, _) => "CLOSURE",
 
             Instruction::True => "TRUE",
             Instruction::False => "FALSE",
