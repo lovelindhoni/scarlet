@@ -67,6 +67,7 @@ pub enum Instruction {
     Closure(usize, Box<[Upvalue]>),
     SetUpvalue(usize),
     GetUpvalue(usize),
+    CloseUpvalue,
     True,
     False,
     Nil,
@@ -103,6 +104,8 @@ impl Instruction {
 
             Instruction::Call(_) => "CALL",
             Instruction::Closure(_, _) => "CLOSURE",
+
+            Instruction::CloseUpvalue => "CLOSE_UPVALUE",
 
             Instruction::True => "TRUE",
             Instruction::False => "FALSE",

@@ -57,8 +57,14 @@ impl ObjFunction {
 }
 
 #[derive(Debug)]
+pub enum UpvalueState {
+    Open(usize),   // stack slot index
+    Closed(Value), // owns the value after variable leaves stack
+}
+
+#[derive(Debug)]
 pub struct ObjUpvalue {
-    pub location: usize,
+    pub state: UpvalueState,
 }
 
 #[repr(u8)]
@@ -111,11 +117,10 @@ impl Heap {
             key
         }
     }
-
     pub fn allocate_upvalue(&mut self, slot: usize) -> HeapKey {
-        let upvalue = ObjUpvalue { location: slot };
-        let object = Object::Upvalue(upvalue);
-        self.arena.insert(object)
+        self.arena.insert(Object::Upvalue(ObjUpvalue {
+            state: UpvalueState::Open(slot),
+        }))
     }
 
     pub fn concatenate_strings(&mut self, left_key: HeapKey, right_key: HeapKey) -> HeapKey {

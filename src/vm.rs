@@ -1,7 +1,7 @@
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::InterpretError;
-use crate::heap::{Heap, HeapKey, Object};
+use crate::heap::{Heap, HeapKey, Object, UpvalueState};
 #[cfg(feature = "trace")]
 use crate::trace::diassemble_instruction;
 
@@ -29,6 +29,7 @@ pub struct VirtualMachine<'a> {
     frames: Vec<CallFrame>,
     stack: Vec<Value>,
     heap: Option<&'a mut Heap>,
+    open_upvalues: Vec<HeapKey>,
 }
 
 impl<'a> VirtualMachine<'a> {
@@ -37,7 +38,37 @@ impl<'a> VirtualMachine<'a> {
             frames: Vec::with_capacity(64),
             stack: Vec::with_capacity(256),
             heap: None,
+            open_upvalues: Vec::new(),
         }
+    }
+    fn capture_upvalue(&mut self, stack_idx: usize) -> HeapKey {
+        for &key in &self.open_upvalues {
+            if let Object::Upvalue(uv) = self.heap.as_ref().unwrap().arena.get(key).unwrap() {
+                if let UpvalueState::Open(loc) = uv.state {
+                    if loc == stack_idx {
+                        return key;
+                    }
+                }
+            }
+        }
+        let key = self.heap.as_mut().unwrap().allocate_upvalue(stack_idx);
+        let pos = self
+            .open_upvalues
+            .iter()
+            .position(|&k| {
+                if let Object::Upvalue(uv) = self.heap.as_ref().unwrap().arena.get(k).unwrap() {
+                    if let UpvalueState::Open(loc) = uv.state {
+                        loc < stack_idx
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(self.open_upvalues.len());
+        self.open_upvalues.insert(pos, key);
+        key
     }
     #[inline]
     // TODO: might let call_value absorb this function within itself, because it does an extra heap lookup
@@ -145,54 +176,78 @@ impl<'a> VirtualMachine<'a> {
 
             match instruction {
                 Instruction::GetUpvalue(slot) => {
-                    let heap = self.heap.as_ref().unwrap();
-                    let upvalue_key =
-                        if let Object::Closure(c) = heap.arena.get(frame.closure).unwrap() {
-                            c.upvalues[*slot]
-                        } else {
-                            unreachable!()
-                        };
+                    let upvalue_key = if let Object::Closure(c) = self
+                        .heap
+                        .as_ref()
+                        .unwrap()
+                        .arena
+                        .get(frame.closure)
+                        .unwrap()
+                    {
+                        c.upvalues[*slot]
+                    } else {
+                        unreachable!()
+                    };
 
-                    let stack_idx =
-                        if let Object::Upvalue(uv) = heap.arena.get(upvalue_key).unwrap() {
-                            uv.location
-                        } else {
-                            unreachable!()
-                        };
-
-                    stack.push(stack[stack_idx]);
+                    let val = match &self.heap.as_ref().unwrap().arena.get(upvalue_key).unwrap() {
+                        Object::Upvalue(uv) => match uv.state {
+                            UpvalueState::Open(idx) => self.stack[idx],
+                            UpvalueState::Closed(v) => v,
+                        },
+                        _ => unreachable!(),
+                    };
+                    self.stack.push(val);
                 }
 
                 Instruction::SetUpvalue(slot) => {
-                    let heap = self.heap.as_ref().unwrap();
-                    let upvalue_key =
-                        if let Object::Closure(c) = heap.arena.get(frame.closure).unwrap() {
-                            c.upvalues[*slot]
-                        } else {
-                            unreachable!()
-                        };
+                    let upvalue_key = if let Object::Closure(c) = self
+                        .heap
+                        .as_ref()
+                        .unwrap()
+                        .arena
+                        .get(frame.closure)
+                        .unwrap()
+                    {
+                        c.upvalues[*slot]
+                    } else {
+                        unreachable!()
+                    };
 
-                    let stack_idx =
-                        if let Object::Upvalue(uv) = heap.arena.get(upvalue_key).unwrap() {
-                            uv.location
-                        } else {
-                            unreachable!()
-                        };
-
-                    let val = *stack.last().unwrap();
-                    stack[stack_idx] = val;
+                    let val = *self.stack.last().unwrap();
+                    if let Object::Upvalue(uv) = self
+                        .heap
+                        .as_mut()
+                        .unwrap()
+                        .arena
+                        .get_mut(upvalue_key)
+                        .unwrap()
+                    {
+                        match &mut uv.state {
+                            UpvalueState::Open(idx) => self.stack[*idx] = val,
+                            UpvalueState::Closed(v) => *v = val,
+                        }
+                    }
+                }
+                Instruction::CloseUpvalue => {
+                    let top_idx = self.stack.len() - 1;
+                    self.close_upvalues(top_idx);
+                    self.stack.pop();
                 }
                 Instruction::Closure(pos, upvalues) => {
                     let value = chunk.values[*pos];
+                    let upvalues = upvalues.clone();
+                    let slot_start = frame.slot_start;
+                    let closure_key = frame.closure;
+
                     if let Value::Object(function_key) = value {
                         let mut upvalue_keys = Vec::new();
                         for uv in upvalues.iter() {
                             let key = if uv.is_local {
-                                let stack_idx = frame.slot_start + uv.index;
-                                self.heap.as_mut().unwrap().allocate_upvalue(stack_idx)
+                                let stack_idx = slot_start + uv.index;
+                                self.capture_upvalue(stack_idx)
                             } else {
                                 let heap = self.heap.as_ref().unwrap();
-                                if let Object::Closure(c) = heap.arena.get(frame.closure).unwrap() {
+                                if let Object::Closure(c) = heap.arena.get(closure_key).unwrap() {
                                     c.upvalues[uv.index]
                                 } else {
                                     unreachable!()
@@ -205,7 +260,7 @@ impl<'a> VirtualMachine<'a> {
                             .as_mut()
                             .unwrap()
                             .allocate_closure(function_key, upvalue_keys);
-                        stack.push(Value::Object(closure_key));
+                        self.stack.push(Value::Object(closure_key));
                     }
                 }
                 Instruction::Call(arg_count) => {
@@ -341,11 +396,28 @@ impl<'a> VirtualMachine<'a> {
                         stack.pop().unwrap();
                         return Ok(());
                     }
-                    stack.truncate(frame.slot_start);
-                    stack.push(result);
+                    let slot_start = frame.slot_start;
+                    self.close_upvalues(slot_start);
+                    self.stack.truncate(slot_start);
+                    self.stack.push(result);
                 }
             }
         }
+    }
+    fn close_upvalues(&mut self, from_slot: usize) {
+        let heap = self.heap.as_mut().unwrap();
+        self.open_upvalues.retain(|&key| {
+            if let Object::Upvalue(uv) = heap.arena.get_mut(key).unwrap() {
+                if let UpvalueState::Open(loc) = uv.state {
+                    if loc >= from_slot {
+                        let val = self.stack[loc];
+                        uv.state = UpvalueState::Closed(val);
+                        return false;
+                    }
+                }
+            }
+            true
+        });
     }
     pub fn interpret(&mut self, function_key: HeapKey, heap: &'a mut Heap) -> Result<()> {
         let closure_key = heap.allocate_closure(function_key, Vec::new());

@@ -55,11 +55,16 @@ pub fn compile(source: Vec<u8>, heap: &mut Heap) -> Result<HeapKey> {
 struct Local {
     token: Token,
     depth: i64,
+    is_captured: bool,
 }
 
 impl Local {
     pub fn new(token: Token, depth: i64) -> Self {
-        Self { token, depth }
+        Self {
+            token,
+            depth,
+            is_captured: false,
+        }
     }
 }
 
@@ -132,8 +137,7 @@ impl<'a> Parser<'a> {
     pub fn declaration(&mut self) -> Result<()> {
         if self.match_token(TokenType::Fun)? {
             self.fun_declaration()?;
-        }
-        if self.match_token(TokenType::Let)? {
+        } else if self.match_token(TokenType::Let)? {
             self.let_declaration()?;
         } else {
             self.statement()?;
@@ -526,9 +530,13 @@ impl<'a> Parser<'a> {
                 .as_ref()
                 .ok_or(CompileError::MissingPreviousToken)?
                 .line;
-
-            self.current_chunk()
-                .write_instruction(Instruction::Pop, line);
+            if self.current_compiler().locals.last().unwrap().is_captured {
+                self.current_chunk()
+                    .write_instruction(Instruction::CloseUpvalue, line);
+            } else {
+                self.current_chunk()
+                    .write_instruction(Instruction::Pop, line);
+            }
             self.compilers.last_mut().unwrap().locals.pop();
         }
 
@@ -736,6 +744,8 @@ impl<'a> Parser<'a> {
         } else {
             let enclosing = &self.compilers[idx - 1];
             if let Some(local) = self.resolve_local(enclosing, token)? {
+                let enclosing = &mut self.compilers[idx - 1];
+                enclosing.locals[local].is_captured = true;
                 return Ok(Some(self.add_upvalue(idx, local, true)));
             }
             if let Some(upvalue) = self.resolve_upvalue(idx - 1, token)? {
