@@ -144,19 +144,70 @@ impl<'a> VirtualMachine<'a> {
             diassemble_instruction(chunk, frame.ip);
 
             match instruction {
-                Instruction::Closure(pos, _upvalues) => {
-                    let value = chunk.values[*pos];
-                    if let Value::Object(function_key) = value {
-                        // The function_key should definitely point to an function_object
-                        let closure_key =
-                            self.heap.as_mut().unwrap().allocate_closure(function_key);
-                        stack.push(Value::Object(closure_key));
-                    } else {
-                        unreachable!()
-                    }
-                    // let function = self
+                Instruction::GetUpvalue(slot) => {
+                    let heap = self.heap.as_ref().unwrap();
+                    let upvalue_key =
+                        if let Object::Closure(c) = heap.arena.get(frame.closure).unwrap() {
+                            c.upvalues[*slot]
+                        } else {
+                            unreachable!()
+                        };
+
+                    let stack_idx =
+                        if let Object::Upvalue(uv) = heap.arena.get(upvalue_key).unwrap() {
+                            uv.location
+                        } else {
+                            unreachable!()
+                        };
+
+                    stack.push(stack[stack_idx]);
                 }
 
+                Instruction::SetUpvalue(slot) => {
+                    let heap = self.heap.as_ref().unwrap();
+                    let upvalue_key =
+                        if let Object::Closure(c) = heap.arena.get(frame.closure).unwrap() {
+                            c.upvalues[*slot]
+                        } else {
+                            unreachable!()
+                        };
+
+                    let stack_idx =
+                        if let Object::Upvalue(uv) = heap.arena.get(upvalue_key).unwrap() {
+                            uv.location
+                        } else {
+                            unreachable!()
+                        };
+
+                    let val = *stack.last().unwrap();
+                    stack[stack_idx] = val;
+                }
+                Instruction::Closure(pos, upvalues) => {
+                    let value = chunk.values[*pos];
+                    if let Value::Object(function_key) = value {
+                        let mut upvalue_keys = Vec::new();
+                        for uv in upvalues.iter() {
+                            let key = if uv.is_local {
+                                let stack_idx = frame.slot_start + uv.index;
+                                self.heap.as_mut().unwrap().allocate_upvalue(stack_idx)
+                            } else {
+                                let heap = self.heap.as_ref().unwrap();
+                                if let Object::Closure(c) = heap.arena.get(frame.closure).unwrap() {
+                                    c.upvalues[uv.index]
+                                } else {
+                                    unreachable!()
+                                }
+                            };
+                            upvalue_keys.push(key);
+                        }
+                        let closure_key = self
+                            .heap
+                            .as_mut()
+                            .unwrap()
+                            .allocate_closure(function_key, upvalue_keys);
+                        stack.push(Value::Object(closure_key));
+                    }
+                }
                 Instruction::Call(arg_count) => {
                     self.call_value(*arg_count)?;
                 }
@@ -297,7 +348,7 @@ impl<'a> VirtualMachine<'a> {
         }
     }
     pub fn interpret(&mut self, function_key: HeapKey, heap: &'a mut Heap) -> Result<()> {
-        let closure_key = heap.allocate_closure(function_key);
+        let closure_key = heap.allocate_closure(function_key, Vec::new());
         self.stack.push(Value::Object(closure_key));
 
         self.heap = Some(heap);

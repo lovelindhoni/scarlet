@@ -31,6 +31,7 @@ impl Value {
             Value::Object(heap_key) => {
                 let object = heap.arena.get(*heap_key).unwrap();
                 match object {
+                    Object::Upvalue(_) => "upvalue".to_string(),
                     Object::String(string) => string.to_owned(),
                     Object::Function(function) => self.print_function(function, heap),
                     Object::Closure(closure) => {

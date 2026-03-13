@@ -92,6 +92,7 @@ fn type_of(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
             let object = heap.arena.get(key).unwrap();
             match object {
                 Object::NativeFunction(_) => "native-function",
+                Object::Upvalue(_) => "upvalue",
                 Object::String(_) => "string",
                 Object::Function(_) | Object::Closure(_) => "function",
             }

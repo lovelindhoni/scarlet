@@ -48,7 +48,7 @@ pub fn compile(source: Vec<u8>, heap: &mut Heap) -> Result<HeapKey> {
     while !parser.match_token(TokenType::Eof)? {
         parser.declaration()?;
     }
-    let function = parser.end_compiler()?;
+    let (function, _upvalues) = parser.end_compiler()?;
     Ok(function)
 }
 
@@ -191,17 +191,15 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::RightParen, "Expect ')' after parameters")?;
         self.consume(TokenType::LeftBrace, "Expect '{' before function body")?;
         self.block()?;
-        let function = self.end_compiler()?;
+        let (function, upvalues) = self.end_compiler()?;
         let idx = self.current_chunk().add_constant(Value::Object(function));
         let line = self
             .previous_token
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        let upvalues =
-            std::mem::take(&mut self.compilers.last_mut().unwrap().upvalues).into_boxed_slice();
         self.current_chunk()
-            .write_instruction(Instruction::Closure(idx, upvalues), line);
+            .write_instruction(Instruction::Closure(idx, upvalues.into_boxed_slice()), line);
 
         Ok(())
     }
@@ -970,10 +968,10 @@ impl<'a> Parser<'a> {
         self.parse_precedence(Precedence::Assignment)?;
         Ok(())
     }
-    fn end_compiler(&mut self) -> Result<HeapKey> {
+    fn end_compiler(&mut self) -> Result<(HeapKey, Vec<Upvalue>)> {
         self.emit_return()?;
         let compiler = self.compilers.pop().unwrap();
-        Ok(compiler.function)
+        Ok((compiler.function, compiler.upvalues))
     }
     fn emit_return(&mut self) -> Result<()> {
         let line = self

@@ -28,6 +28,7 @@ pub enum Object {
     Function(ObjFunction),
     NativeFunction(NativeObjFunction),
     Closure(ObjClosure),
+    Upvalue(ObjUpvalue),
 }
 
 #[derive(Debug)]
@@ -40,6 +41,7 @@ pub struct ObjFunction {
 #[derive(Debug, Clone)]
 pub struct ObjClosure {
     pub function: HeapKey,
+    pub upvalues: Vec<HeapKey>, // each points to objupvalue in the heap
 }
 
 #[derive(Debug)]
@@ -52,6 +54,11 @@ impl ObjFunction {
     pub fn new(arity: u64, chunk: Chunk, name: Option<HeapKey>) -> Self {
         Self { arity, chunk, name }
     }
+}
+
+#[derive(Debug)]
+pub struct ObjUpvalue {
+    pub location: usize,
 }
 
 #[repr(u8)]
@@ -84,9 +91,9 @@ impl Heap {
         self.arena.insert(function)
     }
 
-    pub fn allocate_closure(&mut self, function: HeapKey) -> HeapKey {
+    pub fn allocate_closure(&mut self, function: HeapKey, upvalues: Vec<HeapKey>) -> HeapKey {
         // takes a normal function pointer and returns a closure pointer
-        let closure = ObjClosure { function };
+        let closure = ObjClosure { function, upvalues };
         self.arena.insert(Object::Closure(closure))
     }
 
@@ -103,6 +110,12 @@ impl Heap {
             self.intern_table.insert(string.into(), key);
             key
         }
+    }
+
+    pub fn allocate_upvalue(&mut self, slot: usize) -> HeapKey {
+        let upvalue = ObjUpvalue { location: slot };
+        let object = Object::Upvalue(upvalue);
+        self.arena.insert(object)
     }
 
     pub fn concatenate_strings(&mut self, left_key: HeapKey, right_key: HeapKey) -> HeapKey {
