@@ -1,24 +1,23 @@
-use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::InterpretError;
-use crate::heap::{Heap, HeapKey, Object, UpvalueState};
+use crate::heap::{BASE_GC_TRIGGER, Heap, HeapKey, Object, UpvalueState, mark_object, mark_value};
 #[cfg(feature = "trace")]
 use crate::trace::diassemble_instruction;
+
+const GC_HEAP_GROW_FACTOR: u32 = 2;
 
 type Result<T> = std::result::Result<T, InterpretError>;
 
 struct CallFrame {
     ip: usize,
     closure: HeapKey,
-    chunk: *const Chunk,
     slot_start: usize,
 }
 
 impl CallFrame {
-    pub fn new(ip: usize, closure: HeapKey, chunk: *const Chunk, slot_start: usize) -> Self {
+    pub fn new(ip: usize, closure: HeapKey, slot_start: usize) -> Self {
         Self {
             ip,
-            chunk,
             closure,
             slot_start,
         }
@@ -41,6 +40,36 @@ impl<'a> VirtualMachine<'a> {
             open_upvalues: Vec::new(),
         }
     }
+
+    fn collect_garbage(&mut self) {
+        let (bytes_allocated, next_gc_run) = {
+            let heap = self.heap.as_ref().unwrap();
+            (heap.bytes_allocated, heap.next_gc_run)
+        };
+        if bytes_allocated >= next_gc_run {
+            self.heap.as_mut().unwrap().mark_globals();
+            self.mark_vm_roots();
+            self.heap.as_mut().unwrap().mark_interned_strings();
+            self.heap.as_mut().unwrap().sweep();
+            let heap = self.heap.as_mut().unwrap();
+            heap.next_gc_run =
+                (heap.bytes_allocated * GC_HEAP_GROW_FACTOR as usize).max(BASE_GC_TRIGGER);
+        }
+    }
+
+    fn mark_vm_roots(&mut self) {
+        let heap = self.heap.as_mut().unwrap();
+        for value in &self.stack {
+            mark_value(&heap.arena, &mut heap.marked_objects, value);
+        }
+        for frame in &self.frames {
+            mark_object(&heap.arena, &mut heap.marked_objects, &frame.closure);
+        }
+        for upvalue_key in &self.open_upvalues {
+            mark_object(&heap.arena, &mut heap.marked_objects, upvalue_key);
+        }
+    }
+
     fn capture_upvalue(&mut self, stack_idx: usize) -> HeapKey {
         for &key in &self.open_upvalues {
             if let Object::Upvalue(uv) = self.heap.as_ref().unwrap().arena.get(key).unwrap() {
@@ -99,8 +128,7 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 let slot_start = self.stack.len().checked_sub(arg_count + 1).unwrap();
-                let chunk_ptr = &function.chunk as *const Chunk;
-                let frame = CallFrame::new(0, closure_key, chunk_ptr, slot_start);
+                let frame = CallFrame::new(0, closure_key, slot_start);
                 self.frames.push(frame);
                 Ok(())
             }
@@ -150,14 +178,28 @@ impl<'a> VirtualMachine<'a> {
 
     fn run(&mut self) -> Result<()> {
         loop {
+            self.collect_garbage();
+
             let frame_index = self.frames.len() - 1;
             let frame = &mut self.frames[frame_index];
 
-            let chunk = unsafe { &*frame.chunk };
-            let instruction = unsafe { &*chunk.instructions.get_unchecked(frame.ip) };
-            frame.ip += 1;
+            let heap = self.heap.as_ref().unwrap();
 
+            let closure = match heap.arena.get(frame.closure).unwrap() {
+                Object::Closure(c) => c,
+                _ => unreachable!(),
+            };
+
+            let function = match heap.arena.get(closure.function).unwrap() {
+                Object::Function(f) => f,
+                _ => unreachable!(),
+            };
+
+            let chunk = &function.chunk;
             let stack = &mut self.stack;
+
+            let instruction = &chunk.instructions[frame.ip];
+            frame.ip += 1;
 
             #[cfg(feature = "trace")]
             println!("Gutting VM's stack");

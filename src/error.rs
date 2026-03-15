@@ -4,8 +4,8 @@ use crate::scanner::{Token, TokenType};
 
 #[derive(Debug, Error)]
 pub enum TraceError {
-    #[error("Chunk '{name}' is empty")]
-    EmptyChunk { name: String },
+    #[error("Chunk is empty")]
+    EmptyChunk,
 
     #[error("Instruction pointer {ip} out of bounds (len = {len})")]
     InvalidInstructionPointer { ip: usize, len: usize },

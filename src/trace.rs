@@ -79,9 +79,7 @@ pub fn diassemble(function_key: HeapKey, heap: &Heap) -> Result<()> {
         }
     );
     if chunk.instructions.is_empty() {
-        return Err(TraceError::EmptyChunk {
-            name: chunk.name.clone(),
-        });
+        return Err(TraceError::EmptyChunk);
     }
     for idx in 0..chunk.instructions.len() {
         diassemble_instruction(chunk, idx, heap)?;

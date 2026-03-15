@@ -2,16 +2,14 @@ use crate::common::{Instruction, Value};
 
 #[derive(Debug)]
 pub struct Chunk {
-    pub name: String,
     pub instructions: Vec<Instruction>,
     pub values: Vec<Value>,
     pub lines: Vec<(usize, u64)>, // run length encoding via AOS
 }
 
 impl Chunk {
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new() -> Self {
         Self {
-            name: name.into(),
             instructions: Vec::new(),
             values: Vec::new(),
             lines: Vec::new(),
