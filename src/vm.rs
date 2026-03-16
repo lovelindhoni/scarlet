@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use crate::common::{Instruction, Value};
 use crate::error::InterpretError;
 use crate::heap::{BASE_GC_TRIGGER, Heap, HeapKey, Object, UpvalueState, mark_object, mark_value};
@@ -5,6 +7,8 @@ use crate::heap::{BASE_GC_TRIGGER, Heap, HeapKey, Object, UpvalueState, mark_obj
 use crate::trace::diassemble_instruction;
 
 const GC_HEAP_GROW_FACTOR: u32 = 2;
+const FRAMES_MAX: usize = 64;
+const STACK_MAX: usize = FRAMES_MAX * 256;
 
 type Result<T> = std::result::Result<T, InterpretError>;
 
@@ -27,8 +31,10 @@ impl CallFrame {
 }
 
 pub struct VirtualMachine<'a> {
-    frames: Vec<CallFrame>,
-    stack: Vec<Value>,
+    frames: [MaybeUninit<CallFrame>; FRAMES_MAX],
+    frame_count: usize,
+    stack: [Value; STACK_MAX],
+    stack_top: usize,
     heap: Option<&'a mut Heap>,
     open_upvalues: Vec<HeapKey>,
 }
@@ -36,11 +42,37 @@ pub struct VirtualMachine<'a> {
 impl<'a> VirtualMachine<'a> {
     pub fn new() -> Self {
         Self {
-            frames: Vec::with_capacity(64),
-            stack: Vec::with_capacity(256),
+            frames: unsafe { MaybeUninit::uninit().assume_init() },
+            frame_count: 0,
+            stack: [Value::Nil; STACK_MAX],
+            stack_top: 0,
             heap: None,
             open_upvalues: Vec::new(),
         }
+    }
+
+    #[inline(always)]
+    fn push(&mut self, value: Value) {
+        self.stack[self.stack_top] = value;
+        self.stack_top += 1;
+    }
+
+    #[inline(always)]
+    fn pop(&mut self) -> Value {
+        self.stack_top -= 1;
+        self.stack[self.stack_top]
+    }
+
+    #[inline(always)]
+    fn push_frame(&mut self, frame: CallFrame) {
+        self.frames[self.frame_count].write(frame);
+        self.frame_count += 1;
+    }
+
+    #[inline(always)]
+    fn pop_frame(&mut self) -> CallFrame {
+        self.frame_count -= 1;
+        unsafe { self.frames[self.frame_count].assume_init_read() }
     }
 
     fn collect_garbage(&mut self) {
@@ -61,10 +93,11 @@ impl<'a> VirtualMachine<'a> {
 
     fn mark_vm_roots(&mut self) {
         let heap = self.heap.as_mut().unwrap();
-        for value in &self.stack {
+        for value in &self.stack[..self.stack_top] {
             mark_value(&heap.arena, &mut heap.marked_objects, value);
         }
-        for frame in &self.frames {
+        for i in 0..self.frame_count {
+            let frame = unsafe { self.frames[i].assume_init_ref() };
             mark_object(&heap.arena, &mut heap.marked_objects, &frame.closure);
         }
         for upvalue_key in &self.open_upvalues {
@@ -101,6 +134,7 @@ impl<'a> VirtualMachine<'a> {
         self.open_upvalues.insert(pos, key);
         key
     }
+
     #[inline]
     // TODO: might let call_value absorb this function within itself, because it does an extra heap lookup
     fn call(&mut self, closure_key: HeapKey, arg_count: usize) -> Result<()> {
@@ -130,10 +164,9 @@ impl<'a> VirtualMachine<'a> {
                     });
                 }
 
-                let slot_start = self.stack.len().checked_sub(arg_count + 1).unwrap();
-
+                let slot_start = self.stack_top.checked_sub(arg_count + 1).unwrap();
                 let frame = CallFrame::new(0, closure_key, function_key, slot_start);
-                self.frames.push(frame);
+                self.push_frame(frame);
                 Ok(())
             }
             _ => Err(InterpretError::UncallableObject {}),
@@ -142,7 +175,7 @@ impl<'a> VirtualMachine<'a> {
 
     #[inline]
     fn call_value(&mut self, arg_count: usize) -> Result<()> {
-        let callee_index = self.stack.len().checked_sub(arg_count + 1).unwrap();
+        let callee_index = self.stack_top.checked_sub(arg_count + 1).unwrap();
         let callee = self.stack[callee_index];
 
         if let Value::Object(key) = callee {
@@ -155,20 +188,18 @@ impl<'a> VirtualMachine<'a> {
                     unreachable!()
                 }
                 Object::Closure(_closure) => {
-                    // its okay to clone this here, bcoz, the objclosure doesn't have much data as of now?
                     self.call(key, arg_count)?;
                 }
                 Object::NativeFunction(native_function) => {
-                    let stack_len = self.stack.len();
-                    let args_start = stack_len - arg_count;
+                    let args_start = self.stack_top - arg_count;
                     let result = (native_function.function)(
                         native_function.name,
-                        &self.stack[args_start..],
+                        &self.stack[args_start..self.stack_top],
                         heap,
                     )
                     .map_err(|message| InterpretError::NativeFunctionError { message })?;
-                    self.stack.truncate(stack_len - (arg_count + 1));
-                    self.stack.push(result);
+                    self.stack_top -= arg_count + 1;
+                    self.push(result);
                 }
                 _ => {
                     return Err(InterpretError::UncallableObject);
@@ -184,8 +215,8 @@ impl<'a> VirtualMachine<'a> {
         loop {
             self.collect_garbage();
 
-            let frame_index = self.frames.len() - 1;
-            let frame = unsafe { self.frames.get_unchecked_mut(frame_index) };
+            let frame_index = self.frame_count - 1;
+            let frame = unsafe { self.frames[frame_index].assume_init_mut() };
 
             let heap = self.heap.as_ref().unwrap();
             let function = unsafe {
@@ -205,10 +236,10 @@ impl<'a> VirtualMachine<'a> {
             println!("Gutting VM's stack");
 
             #[cfg(feature = "trace")]
-            if self.stack.is_empty() {
+            if self.stack_top == 0 {
                 println!("Stack is Empty!");
             } else {
-                for value in &self.stack {
+                for value in &self.stack[..self.stack_top] {
                     println!("[ {:?} ]", value);
                 }
             }
@@ -233,12 +264,13 @@ impl<'a> VirtualMachine<'a> {
 
                     let val = match &self.heap.as_ref().unwrap().arena.get(upvalue_key).unwrap() {
                         Object::Upvalue(uv) => match uv.state {
-                            UpvalueState::Open(idx) => self.stack[idx],
+                            UpvalueState::Open(idx) => stack[idx],
                             UpvalueState::Closed(v) => v,
                         },
                         _ => unreachable!(),
                     };
-                    self.stack.push(val);
+                    stack[self.stack_top] = val;
+                    self.stack_top += 1;
                 }
 
                 Instruction::SetUpvalue(slot) => {
@@ -255,7 +287,7 @@ impl<'a> VirtualMachine<'a> {
                         unreachable!()
                     };
 
-                    let val = *self.stack.last().unwrap();
+                    let val = stack[self.stack_top - 1];
                     if let Object::Upvalue(uv) = self
                         .heap
                         .as_mut()
@@ -270,11 +302,13 @@ impl<'a> VirtualMachine<'a> {
                         }
                     }
                 }
+
                 Instruction::CloseUpvalue => {
-                    let top_idx = self.stack.len() - 1;
+                    let top_idx = self.stack_top - 1;
                     self.close_upvalues(top_idx);
-                    self.stack.pop();
+                    self.stack_top -= 1;
                 }
+
                 Instruction::Closure(pos, upvalues) => {
                     let value = chunk.values[*pos];
                     let upvalues = upvalues.clone();
@@ -302,12 +336,14 @@ impl<'a> VirtualMachine<'a> {
                             .as_mut()
                             .unwrap()
                             .allocate_closure(function_key, upvalue_keys);
-                        self.stack.push(Value::Object(closure_key));
+                        self.push(Value::Object(closure_key));
                     }
                 }
+
                 Instruction::Call(arg_count) => {
                     self.call_value(*arg_count)?;
                 }
+
                 Instruction::Loop(offset) => {
                     frame.ip -= offset;
                 }
@@ -317,8 +353,8 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::JumpIfFalse(offset) => {
-                    let is_falsey = match stack.last().unwrap() {
-                        Value::Boolean(boolean) => !*boolean,
+                    let is_falsey = match stack[self.stack_top - 1] {
+                        Value::Boolean(boolean) => !boolean,
                         Value::Nil => true,
                         _ => false,
                     };
@@ -329,16 +365,19 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::SetLocal(pos) => {
-                    stack[frame.slot_start + pos] = *stack.last().unwrap();
+                    let val = stack[self.stack_top - 1];
+                    stack[frame.slot_start + pos] = val;
                 }
 
                 Instruction::GetLocal(pos) => {
-                    stack.push(stack[frame.slot_start + pos]);
+                    let val = stack[frame.slot_start + pos];
+                    stack[self.stack_top] = val;
+                    self.stack_top += 1;
                 }
 
                 Instruction::SetGlobal(pos) => {
                     if let Value::Object(key) = chunk.values[*pos] {
-                        let val = *stack.last().unwrap();
+                        let val = stack[self.stack_top - 1];
                         let heap = self.heap.as_mut().unwrap();
                         match heap.globals.get_mut(&key) {
                             Some(slot) => *slot = val,
@@ -353,7 +392,8 @@ impl<'a> VirtualMachine<'a> {
 
                 Instruction::DefineGlobal(pos) => {
                     if let Value::Object(key) = chunk.values[*pos] {
-                        let val = stack.pop().unwrap();
+                        self.stack_top -= 1;
+                        let val = stack[self.stack_top];
                         self.heap.as_mut().unwrap().globals.insert(key, val);
                     }
                 }
@@ -361,7 +401,10 @@ impl<'a> VirtualMachine<'a> {
                 Instruction::GetGlobal(pos) => {
                     if let Value::Object(key) = chunk.values[*pos] {
                         match self.heap.as_ref().unwrap().globals.get(&key) {
-                            Some(&val) => stack.push(val),
+                            Some(&val) => {
+                                stack[self.stack_top] = val;
+                                self.stack_top += 1;
+                            }
                             None => {
                                 return Err(InterpretError::UndefinedVariable {
                                     identifier: self.key_to_string(key),
@@ -372,23 +415,28 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::Pop => {
-                    stack.pop().unwrap();
+                    self.stack_top -= 1;
                 }
 
                 Instruction::Constant(pos) => {
-                    stack.push(chunk.values[*pos]);
+                    let val = chunk.values[*pos];
+                    stack[self.stack_top] = val;
+                    self.stack_top += 1;
                 }
 
                 Instruction::True => {
-                    stack.push(Value::Boolean(true));
+                    stack[self.stack_top] = Value::Boolean(true);
+                    self.stack_top += 1;
                 }
 
                 Instruction::False => {
-                    stack.push(Value::Boolean(false));
+                    stack[self.stack_top] = Value::Boolean(false);
+                    self.stack_top += 1;
                 }
 
                 Instruction::Nil => {
-                    stack.push(Value::Nil);
+                    stack[self.stack_top] = Value::Nil;
+                    self.stack_top += 1;
                 }
 
                 Instruction::Not => {
@@ -432,20 +480,23 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::Return => {
-                    let result = stack.pop().unwrap();
-                    let frame = self.frames.pop().unwrap();
-                    if self.frames.is_empty() {
-                        stack.pop().unwrap();
+                    self.stack_top -= 1;
+                    let result = self.stack[self.stack_top];
+                    let frame = self.pop_frame();
+                    if self.frame_count == 0 {
+                        self.stack_top -= 1;
                         return Ok(());
                     }
                     let slot_start = frame.slot_start;
                     self.close_upvalues(slot_start);
-                    self.stack.truncate(slot_start);
-                    self.stack.push(result);
+                    self.stack_top = slot_start;
+                    self.stack[self.stack_top] = result;
+                    self.stack_top += 1;
                 }
             }
         }
     }
+
     fn close_upvalues(&mut self, from_slot: usize) {
         let heap = self.heap.as_mut().unwrap();
         self.open_upvalues.retain(|&key| {
@@ -461,9 +512,10 @@ impl<'a> VirtualMachine<'a> {
             true
         });
     }
+
     pub fn interpret(&mut self, function_key: HeapKey, heap: &'a mut Heap) -> Result<()> {
         let closure_key = heap.allocate_closure(function_key, Vec::new());
-        self.stack.push(Value::Object(closure_key));
+        self.push(Value::Object(closure_key));
 
         self.heap = Some(heap);
         self.call(closure_key, 0)?;
@@ -479,7 +531,7 @@ impl<'a> VirtualMachine<'a> {
 
     #[inline(always)]
     fn unary_op(&mut self, op: Instruction) -> Result<()> {
-        let val = self.stack.pop().expect("Stack underflow");
+        let val = self.pop();
 
         let result = match op {
             Instruction::Negate => match val {
@@ -498,14 +550,14 @@ impl<'a> VirtualMachine<'a> {
             _ => unreachable!("Invalid unary operation"),
         };
 
-        self.stack.push(result);
+        self.push(result);
         Ok(())
     }
 
     #[inline(always)]
     fn binary_op(&mut self, op: Instruction) -> Result<()> {
-        let b = self.stack.pop().expect("Stack underflow");
-        let a = self.stack.pop().expect("Stack underflow");
+        let b = self.pop();
+        let a = self.pop();
 
         let result = match op {
             Instruction::Add => match (a, b) {
@@ -541,7 +593,7 @@ impl<'a> VirtualMachine<'a> {
             _ => return Err(InterpretError::InvalidBinaryOp),
         };
 
-        self.stack.push(result);
+        self.push(result);
         Ok(())
     }
 
@@ -581,9 +633,11 @@ impl<'a> VirtualMachine<'a> {
             _ => Value::Boolean(false),
         })
     }
+
     fn print_stack_trace(&self) {
         let heap = self.heap.as_ref().unwrap();
-        for frame in self.frames.iter().rev() {
+        for i in (0..self.frame_count).rev() {
+            let frame = unsafe { self.frames[i].assume_init_ref() };
             let function_key =
                 if let Object::Closure(closure) = heap.arena.get(frame.closure).unwrap() {
                     closure.function
@@ -607,6 +661,7 @@ impl<'a> VirtualMachine<'a> {
             }
         }
     }
+
     fn key_to_string(&self, key: HeapKey) -> String {
         match self.heap.as_ref().unwrap().arena.get(key) {
             Some(Object::String(s)) => s.clone(),
