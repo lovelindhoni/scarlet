@@ -12,13 +12,15 @@ struct CallFrame {
     ip: usize,
     closure: HeapKey,
     slot_start: usize,
+    function_key: HeapKey,
 }
 
 impl CallFrame {
-    pub fn new(ip: usize, closure: HeapKey, slot_start: usize) -> Self {
+    pub fn new(ip: usize, closure: HeapKey, function_key: HeapKey, slot_start: usize) -> Self {
         Self {
             ip,
             closure,
+            function_key,
             slot_start,
         }
     }
@@ -104,10 +106,13 @@ impl<'a> VirtualMachine<'a> {
     fn call(&mut self, closure_key: HeapKey, arg_count: usize) -> Result<()> {
         let heap = self.heap.as_ref().unwrap();
 
-        let function_key = if let Object::Closure(closure) = heap.arena.get(closure_key).unwrap() {
-            closure.function
-        } else {
-            unreachable!()
+        let function_key = match heap
+            .arena
+            .get(closure_key)
+            .expect("closure missing from arena")
+        {
+            Object::Closure(closure) => closure.function,
+            _ => unreachable!(),
         };
 
         match heap
@@ -117,18 +122,17 @@ impl<'a> VirtualMachine<'a> {
         {
             Object::Function(function) => {
                 if function.arity as usize != arg_count {
-                    return {
-                        Err(InterpretError::ArgumentsCountMismatch {
-                            message: format!(
-                                "Expected {} arguments but got {}.",
-                                function.arity, arg_count
-                            ),
-                        })
-                    };
+                    return Err(InterpretError::ArgumentsCountMismatch {
+                        message: format!(
+                            "Expected {} arguments but got {}.",
+                            function.arity, arg_count
+                        ),
+                    });
                 }
 
                 let slot_start = self.stack.len().checked_sub(arg_count + 1).unwrap();
-                let frame = CallFrame::new(0, closure_key, slot_start);
+
+                let frame = CallFrame::new(0, closure_key, function_key, slot_start);
                 self.frames.push(frame);
                 Ok(())
             }
@@ -181,24 +185,20 @@ impl<'a> VirtualMachine<'a> {
             self.collect_garbage();
 
             let frame_index = self.frames.len() - 1;
-            let frame = &mut self.frames[frame_index];
+            let frame = unsafe { self.frames.get_unchecked_mut(frame_index) };
 
             let heap = self.heap.as_ref().unwrap();
-
-            let closure = match heap.arena.get(frame.closure).unwrap() {
-                Object::Closure(c) => c,
-                _ => unreachable!(),
-            };
-
-            let function = match heap.arena.get(closure.function).unwrap() {
-                Object::Function(f) => f,
-                _ => unreachable!(),
+            let function = unsafe {
+                match heap.arena.get_unchecked(frame.function_key) {
+                    Object::Function(f) => f,
+                    _ => core::hint::unreachable_unchecked(),
+                }
             };
 
             let chunk = &function.chunk;
             let stack = &mut self.stack;
+            let instruction = unsafe { chunk.instructions.get_unchecked(frame.ip) };
 
-            let instruction = &chunk.instructions[frame.ip];
             frame.ip += 1;
 
             #[cfg(feature = "trace")]
