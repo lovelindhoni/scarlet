@@ -1,6 +1,5 @@
 use crate::common::{Instruction, Value};
 
-#[derive(Debug)]
 pub struct Chunk {
     pub instructions: Vec<Instruction>,
     pub values: Vec<Value>,

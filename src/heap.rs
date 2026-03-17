@@ -12,7 +12,7 @@ new_key_type! {
     pub struct HeapKey;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Upvalue {
     pub index: usize,
     pub is_local: bool,
@@ -24,7 +24,6 @@ impl Upvalue {
     }
 }
 
-#[derive(Debug)]
 pub enum Object {
     String(String),
     Function(ObjFunction),
@@ -36,20 +35,18 @@ pub enum Object {
     BoundMethod(ObjBoundMethod),
 }
 
-#[derive(Debug)]
 pub struct ObjFunction {
     pub arity: u64,
     pub chunk: Chunk,
     pub name: Option<HeapKey>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ObjClosure {
     pub function: HeapKey,
     pub upvalues: Vec<HeapKey>, // each points to objupvalue in the heap
 }
 
-#[derive(Debug)]
 pub struct NativeObjFunction {
     pub name: &'static str,
     pub function: NativeFn,
@@ -61,26 +58,22 @@ impl ObjFunction {
     }
 }
 
-#[derive(Debug)]
 pub struct ObjClass {
     pub name: HeapKey,
     pub methods: RapidHashMap<HeapKey, Value>,
 }
 
-#[derive(Debug)]
 pub struct ObjInstance {
     pub class: HeapKey,
     pub fields: RapidHashMap<HeapKey, Value>, // heapkey is objstring heapkey
 }
 
-#[derive(Debug)]
 #[repr(u8)]
 pub enum UpvalueState {
     Open(usize),   // stack slot index
     Closed(Value), // owns the value after variable leaves stack
 }
 
-#[derive(Debug)]
 pub struct ObjUpvalue {
     pub state: UpvalueState,
 }
@@ -93,7 +86,6 @@ pub enum FunctionType {
     Script,
 }
 
-#[derive(Debug)]
 pub struct ObjBoundMethod {
     pub receiver: Value,
     pub method: HeapKey, // closure key

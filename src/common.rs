@@ -1,6 +1,6 @@
 use crate::heap::{Heap, HeapKey, ObjFunction, Object, Upvalue};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub enum Value {
     Number(f64),
     Boolean(bool),
@@ -85,7 +85,7 @@ impl Value {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Instruction {
     Constant(usize),
     DefineGlobal(usize),

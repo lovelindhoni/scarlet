@@ -104,7 +104,7 @@ fn type_of(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     Ok(Value::Object(key))
 }
 
-fn sleep(fn_name: &'static str, args: &[Value], _heap: &mut Heap) -> Result {
+fn sleep(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     check_arguments_len(1, args.len(), fn_name)?;
 
     if let Value::Number(duration) = args[0] {
@@ -112,8 +112,9 @@ fn sleep(fn_name: &'static str, args: &[Value], _heap: &mut Heap) -> Result {
         Ok(Value::Nil)
     } else {
         Err(format!(
-            "{}() takes an argument of type 'number' - found '{:?}'",
-            fn_name, args[0]
+            "{}() takes an argument of type 'number' - found '{}'",
+            fn_name,
+            args[0].display(heap)
         ))
     }
 }
