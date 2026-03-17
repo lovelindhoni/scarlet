@@ -18,7 +18,7 @@ use crate::trace::diassemble;
 use crate::vm::VirtualMachine;
 
 fn main() {
-    let source = match fs::read("./main.cia") {
+    let source = match fs::read("./main.scar") {
         Ok(s) => s,
         Err(e) => {
             eprintln!("IO Error: {}", e);
