@@ -330,6 +330,105 @@ impl<'a> VirtualMachine<'a> {
             diassemble_instruction(chunk, frame.ip);
 
             match instruction {
+                Instruction::SuperInvoke(name_pos, arg_count) => {
+                    let arg_count = *arg_count;
+
+                    let name_key = {
+                        let heap = self.heap.as_ref().unwrap();
+                        let frame = unsafe { self.frames[self.frame_count - 1].assume_init_ref() };
+                        let function = match heap.arena.get(frame.function_key).unwrap() {
+                            Object::Function(f) => f,
+                            _ => unreachable!(),
+                        };
+                        match function.chunk.values[*name_pos] {
+                            Value::Object(k) => k,
+                            _ => unreachable!(),
+                        }
+                    };
+
+                    let Value::Object(superclass_key) = self.pop() else {
+                        return Err(InterpretError::TypeError {
+                            message: "Superclass must be a class.".to_string(),
+                        });
+                    };
+
+                    let closure_key = {
+                        let heap = self.heap.as_ref().unwrap();
+                        let Object::Class(superclass) = heap.arena.get(superclass_key).unwrap()
+                        else {
+                            return Err(InterpretError::TypeError {
+                                message: "Superclass must be a class.".to_string(),
+                            });
+                        };
+                        superclass.methods.get(&name_key).and_then(|v| {
+                            if let Value::Object(k) = v {
+                                Some(*k)
+                            } else {
+                                None
+                            }
+                        })
+                    };
+
+                    let closure_key =
+                        closure_key.ok_or_else(|| InterpretError::UndefinedProperty {
+                            identifier: self.key_to_string(name_key),
+                        })?;
+
+                    self.call(closure_key, arg_count)?;
+                }
+                Instruction::GetSuper(pos) => {
+                    let Value::Object(name) = chunk.values[*pos] else {
+                        unreachable!()
+                    };
+                    let Value::Object(super_class) = self.pop() else {
+                        unreachable!();
+                    };
+                    self.bind_method(super_class, name)?;
+                }
+                Instruction::Inherit => {
+                    let superclass_val = stack[self.stack_top - 2];
+                    let subclass_val = stack[self.stack_top - 1];
+
+                    let Value::Object(superclass_key) = superclass_val else {
+                        return Err(InterpretError::TypeError {
+                            message: "Superclass must be a class.".to_string(),
+                        });
+                    };
+                    let Value::Object(subclass_key) = subclass_val else {
+                        unreachable!()
+                    };
+
+                    {
+                        let heap = self.heap.as_ref().unwrap();
+                        if !matches!(heap.arena.get(superclass_key).unwrap(), Object::Class(_)) {
+                            return Err(InterpretError::TypeError {
+                                message: "Superclass must be a class.".to_string(),
+                            });
+                        }
+                    }
+
+                    let methods_to_copy: Vec<(HeapKey, Value)> = {
+                        let heap = self.heap.as_ref().unwrap();
+                        let Object::Class(superclass) = heap.arena.get(superclass_key).unwrap()
+                        else {
+                            unreachable!()
+                        };
+                        superclass.methods.iter().map(|(&k, &v)| (k, v)).collect()
+                    };
+
+                    {
+                        let heap = self.heap.as_mut().unwrap();
+                        let Object::Class(subclass) = heap.arena.get_mut(subclass_key).unwrap()
+                        else {
+                            unreachable!()
+                        };
+                        for (name_key, method_val) in methods_to_copy {
+                            subclass.methods.entry(name_key).or_insert(method_val);
+                        }
+                    }
+
+                    self.pop();
+                }
                 Instruction::Invoke(name_pos, arg_count) => {
                     let arg_count = *arg_count;
 
@@ -648,7 +747,7 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::Pop => {
-                    self.stack_top -= 1;
+                    self.pop();
                 }
 
                 Instruction::Constant(pos) => {

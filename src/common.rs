@@ -105,7 +105,10 @@ pub enum Instruction {
     SetProperty(usize),
     Method(usize),
     Invoke(usize, usize),
+    GetSuper(usize),
+    SuperInvoke(usize, usize),
     CloseUpvalue,
+    Inherit,
     True,
     False,
     Nil,
@@ -143,12 +146,14 @@ impl Instruction {
             Instruction::Call(_) => "CALL",
             Instruction::Closure(_, _) => "CLOSURE",
             Instruction::Invoke(_, _) => "INVOKE",
+            Instruction::SuperInvoke(_, _) => "SUPER_INVOKE",
 
             Instruction::Class(_) => "CLASS",
             Instruction::GetProperty(_) => "GET_PROPERTY",
             Instruction::SetProperty(_) => "SET_PROPERTY",
 
             Instruction::Method(_) => "METHOD",
+            Instruction::GetSuper(_) => "GET_SUPER",
 
             Instruction::CloseUpvalue => "CLOSE_UPVALUE",
 
@@ -170,6 +175,8 @@ impl Instruction {
             Instruction::Less => "LESS",
 
             Instruction::Pop => "POP",
+
+            Instruction::Inherit => "INHERIT",
         }
     }
 }

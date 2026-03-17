@@ -106,7 +106,9 @@ impl Compiler {
     }
 }
 
-struct ClassCompiler {}
+struct ClassCompiler {
+    pub has_super_class: bool,
+}
 
 struct Parser<'a> {
     previous_token: Option<Token>,
@@ -186,9 +188,40 @@ impl<'a> Parser<'a> {
 
         self.define_variable(name_constant)?;
 
+        self.class_compilers.push(ClassCompiler {
+            has_super_class: false,
+        });
+
+        if self.match_token(TokenType::Inherits)? {
+            self.consume(
+                TokenType::Identifier,
+                "Expect superclass name after inherits keyword in class",
+            )?;
+            self.variable(false)?;
+            if self.identifiers_equal(
+                &class_name,
+                self.previous_token
+                    .as_ref()
+                    .ok_or(CompileError::MissingPreviousToken)?,
+            ) {
+                return Err(CompileError::Selfheritance);
+            }
+            self.begin_scope();
+            self.add_local(self.synthetic_token("super"));
+            self.define_variable(0)?;
+            self.named_variable(class_name.clone(), false)?;
+            let line = self
+                .previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .line;
+            self.current_chunk()
+                .write_instruction(Instruction::Inherit, line);
+            self.class_compilers.last_mut().unwrap().has_super_class = true;
+        }
+
         self.named_variable(class_name, false)?;
 
-        self.class_compilers.push(ClassCompiler {});
         self.consume(TokenType::LeftBrace, "Expect '{' before class body")?;
 
         while !self.check(TokenType::RightBrace)? && !self.check(TokenType::Eof)? {
@@ -197,7 +230,6 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenType::RightBrace, "Expect '}' after class body")?;
 
-        self.class_compilers.pop();
         let line = self
             .previous_token
             .as_ref()
@@ -205,6 +237,13 @@ impl<'a> Parser<'a> {
             .line;
         self.current_chunk()
             .write_instruction(Instruction::Pop, line);
+
+        let had_superclass = self.class_compilers.last().unwrap().has_super_class;
+        self.class_compilers.pop();
+
+        if had_superclass {
+            self.end_scope()?;
+        }
         Ok(())
     }
 
@@ -690,6 +729,8 @@ impl<'a> Parser<'a> {
             TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::True | TokenType::False | TokenType::Nil => self.literal(),
 
+            TokenType::Super => self._super(),
+
             TokenType::This => self.this(),
 
             _ => Err(CompileError::MissingPrefixParser {
@@ -714,6 +755,54 @@ impl<'a> Parser<'a> {
             });
         }
         self.variable(false)?;
+        Ok(())
+    }
+
+    fn synthetic_token(&self, text: &str) -> Token {
+        Token {
+            variant: TokenType::Identifier,
+            lexeme: text.as_bytes().to_vec(),
+            line: 0,
+        }
+    }
+
+    fn _super(&mut self) -> Result<()> {
+        if self.class_compilers.is_empty() {
+            return Err(CompileError::SuperOutsideClass);
+        } else if !self.class_compilers.last().unwrap().has_super_class {
+            return Err(CompileError::SuperInBaseClass);
+        }
+
+        self.consume(TokenType::Dot, "Expect '.' after 'super'")?;
+        self.consume(TokenType::Identifier, "Expect superclass method name.")?;
+
+        let name = self.identifier_constant(
+            self.previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .lexeme
+                .clone(),
+        );
+
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+
+        self.named_variable(self.synthetic_token("this"), false)?;
+
+        if self.match_token(TokenType::LeftParen)? {
+            let arg_count = self.argument_list()?;
+            self.named_variable(self.synthetic_token("super"), false)?;
+            self.current_chunk()
+                .write_instruction(Instruction::SuperInvoke(name, arg_count), line);
+        } else {
+            self.named_variable(self.synthetic_token("super"), false)?;
+            self.current_chunk()
+                .write_instruction(Instruction::GetSuper(name), line);
+        }
+
         Ok(())
     }
 

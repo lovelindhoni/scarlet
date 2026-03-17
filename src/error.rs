@@ -36,6 +36,15 @@ pub enum CompileError {
     #[error("{msg}", msg = compile_error_helper("Can't use 'this' outside of a class.", token))]
     ThisOutsideClass { token: Token },
 
+    #[error("A class can't inherit from itself")]
+    Selfheritance, // selfheritance, lmao
+
+    #[error("Can't use 'super' outside of a class")]
+    SuperOutsideClass,
+
+    #[error("Can't use 'super' in a class with no superclass")]
+    SuperInBaseClass,
+
     #[error("Internal: Missing current token when parsing")]
     MissingCurrentToken,
 

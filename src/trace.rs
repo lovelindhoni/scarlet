@@ -19,6 +19,26 @@ fn simple_instruction(idx: usize, chunk: &Chunk, instruction: &Instruction) {
     println!("{:04} {:>4} {:<16}", idx, line, instruction.opcode());
 }
 
+fn invoke_instruction(
+    idx: usize,
+    arg_count: &usize,
+    chunk: &Chunk,
+    pos: &usize,
+    heap: &Heap,
+    instruction: &Instruction,
+) {
+    let line = print_prefix(idx, chunk);
+    println!(
+        "{:04} {:>4} {:<16} {:4} ({} args) '{:?}'",
+        idx,
+        line,
+        instruction.opcode(),
+        pos,
+        arg_count,
+        chunk.values[*pos].display(heap)
+    );
+}
+
 fn constant_instruction(
     idx: usize,
     chunk: &Chunk,
@@ -121,17 +141,8 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize, heap: &Heap) -> Result<
             constant_instruction(idx, chunk, pos, instruction, heap);
         }
 
-        Instruction::Invoke(pos, arg_count) => {
-            let line = print_prefix(idx, chunk);
-            println!(
-                "{:04} {:>4} {:<16} {:4} ({} args) '{:?}'",
-                idx,
-                line,
-                instruction.opcode(),
-                pos,
-                arg_count,
-                chunk.values[*pos].display(heap)
-            );
+        Instruction::SuperInvoke(pos, arg_count) | Instruction::Invoke(pos, arg_count) => {
+            invoke_instruction(idx, arg_count, chunk, pos, heap, instruction);
         }
 
         Instruction::Closure(pos, upvalues) => {

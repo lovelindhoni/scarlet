@@ -122,10 +122,20 @@ impl Scanner {
                     b'o' => self.check_keyword(1, 1, "r", TokenType::Or),
                     b'r' => self.check_keyword(1, 5, "eturn", TokenType::Return),
                     b'w' => self.check_keyword(1, 4, "hile", TokenType::While),
-                    b'i' => self.check_keyword(1, 1, "f", TokenType::If),
                     b'e' => self.check_keyword(1, 3, "lse", TokenType::Else),
                     b's' => self.check_keyword(1, 4, "uper", TokenType::Super),
                     b'l' => self.check_keyword(1, 2, "et", TokenType::Let),
+                    b'i' => {
+                        if self.current - self.start > 1 {
+                            match self.source[self.start + 1] {
+                                b'f' => self.check_keyword(2, 0, "", TokenType::If),
+                                b'n' => self.check_keyword(2, 6, "herits", TokenType::Inherits),
+                                _ => TokenType::Identifier,
+                            }
+                        } else {
+                            TokenType::Identifier
+                        }
+                    }
                     b'f' => {
                         if self.current - self.start > 1 {
                             match self.source[self.start + 1] {
@@ -291,6 +301,7 @@ pub enum TokenType {
     True,
     Let,
     While,
+    Inherits,
 
     Eof,
 }
@@ -343,6 +354,7 @@ impl fmt::Display for TokenType {
             TokenType::True => "true",
             TokenType::Let => "let",
             TokenType::While => "while",
+            TokenType::Inherits => "inherits",
 
             TokenType::Eof => "end of file",
         };
