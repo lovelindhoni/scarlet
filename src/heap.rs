@@ -1,4 +1,4 @@
-use rapidhash::RapidHashMap;
+use rapidhash::{HashMapExt, RapidHashMap};
 use slotmap::{SecondaryMap, SlotMap, new_key_type};
 
 use crate::{chunk::Chunk, common::Value};
@@ -31,6 +31,8 @@ pub enum Object {
     NativeFunction(NativeObjFunction),
     Closure(ObjClosure),
     Upvalue(ObjUpvalue),
+    Class(ObjClass),
+    Instance(ObjInstance),
 }
 
 #[derive(Debug)]
@@ -59,6 +61,18 @@ impl ObjFunction {
 }
 
 #[derive(Debug)]
+pub struct ObjClass {
+    pub name: HeapKey,
+}
+
+#[derive(Debug)]
+pub struct ObjInstance {
+    pub class: HeapKey,
+    pub fields: RapidHashMap<HeapKey, Value>, // heapkey is objstring heapkey
+}
+
+#[derive(Debug)]
+#[repr(u8)]
 pub enum UpvalueState {
     Open(usize),   // stack slot index
     Closed(Value), // owns the value after variable leaves stack
@@ -122,6 +136,18 @@ pub fn mark_object(
                     dfs_stack.push(*child_key);
                 }
             }
+            Object::Class(class) => {
+                dfs_stack.push(class.name);
+            }
+            Object::Instance(instance) => {
+                dfs_stack.push(instance.class);
+                for (identifier_key, value) in &instance.fields {
+                    dfs_stack.push(*identifier_key);
+                    if let Value::Object(object_key) = value {
+                        dfs_stack.push(*object_key);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -140,8 +166,8 @@ impl Heap {
     pub fn new() -> Self {
         Self {
             arena: SlotMap::with_key(),
-            intern_table: RapidHashMap::default(),
-            globals: RapidHashMap::default(),
+            intern_table: RapidHashMap::new(),
+            globals: RapidHashMap::new(),
             marked_objects: SecondaryMap::new(),
             bytes_allocated: 0,
             next_gc_run: BASE_GC_TRIGGER,
@@ -222,11 +248,25 @@ impl Heap {
             key
         }
     }
+
     pub fn allocate_upvalue(&mut self, slot: usize) -> HeapKey {
         self.bytes_allocated += std::mem::size_of::<Object>();
         self.arena.insert(Object::Upvalue(ObjUpvalue {
             state: UpvalueState::Open(slot),
         }))
+    }
+
+    pub fn allocate_class(&mut self, name: HeapKey) -> HeapKey {
+        let class = ObjClass { name };
+        self.arena.insert(Object::Class(class))
+    }
+
+    pub fn allocate_instance(&mut self, class: HeapKey) -> HeapKey {
+        let instance = ObjInstance {
+            class,
+            fields: RapidHashMap::new(),
+        };
+        self.arena.insert(Object::Instance(instance))
     }
 
     pub fn concatenate_strings(&mut self, left_key: HeapKey, right_key: HeapKey) -> HeapKey {

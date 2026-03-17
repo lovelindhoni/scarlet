@@ -117,6 +117,7 @@ impl Scanner {
                 }
                 let identifier = match self.source[self.start] {
                     b'a' => self.check_keyword(1, 2, "nd", TokenType::And),
+                    b'c' => self.check_keyword(1, 4, "lass", TokenType::Class),
                     b'n' => self.check_keyword(1, 2, "il", TokenType::Nil),
                     b'o' => self.check_keyword(1, 1, "r", TokenType::Or),
                     b'r' => self.check_keyword(1, 5, "eturn", TokenType::Return),
@@ -285,6 +286,7 @@ pub enum TokenType {
     Or,
     Return,
     Super,
+    Class,
     This,
     True,
     Let,
@@ -331,6 +333,7 @@ impl fmt::Display for TokenType {
             TokenType::False => "false",
             TokenType::For => "for",
             TokenType::Fun => "fun",
+            TokenType::Class => "class",
             TokenType::If => "if",
             TokenType::Nil => "nil",
             TokenType::Or => "or",

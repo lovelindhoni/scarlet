@@ -46,6 +46,27 @@ impl Value {
                     Object::NativeFunction(native_function) => {
                         format!("fn {}()", native_function.name)
                     }
+                    Object::Instance(instance) => {
+                        let name =
+                            if let Object::Class(class) = heap.arena.get(instance.class).unwrap() {
+                                if let Object::String(name) = heap.arena.get(class.name).unwrap() {
+                                    name
+                                } else {
+                                    unreachable!()
+                                }
+                            } else {
+                                unreachable!();
+                            };
+                        format!("{} instance", name)
+                    }
+                    Object::Class(obj_class) => {
+                        if let Object::String(class_name) = heap.arena.get(obj_class.name).unwrap()
+                        {
+                            format!("class {} {{}}", class_name)
+                        } else {
+                            unreachable!()
+                        }
+                    }
                 }
             }
         }
@@ -67,6 +88,9 @@ pub enum Instruction {
     Closure(usize, Box<[Upvalue]>),
     SetUpvalue(usize),
     GetUpvalue(usize),
+    Class(usize),
+    GetProperty(usize),
+    SetProperty(usize),
     CloseUpvalue,
     True,
     False,
@@ -104,6 +128,10 @@ impl Instruction {
 
             Instruction::Call(_) => "CALL",
             Instruction::Closure(_, _) => "CLOSURE",
+
+            Instruction::Class(_) => "CLASS",
+            Instruction::GetProperty(_) => "GET_PROPERTY",
+            Instruction::SetProperty(_) => "SET_PROPERTY",
 
             Instruction::CloseUpvalue => "CLOSE_UPVALUE",
 

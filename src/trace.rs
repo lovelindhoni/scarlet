@@ -113,6 +113,9 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize, heap: &Heap) -> Result<
         Instruction::GetGlobal(pos)
         | Instruction::SetGlobal(pos)
         | Instruction::Constant(pos)
+        | Instruction::Class(pos)
+        | Instruction::GetProperty(pos)
+        | Instruction::SetProperty(pos)
         | Instruction::DefineGlobal(pos) => {
             constant_instruction(idx, chunk, pos, instruction, heap);
         }

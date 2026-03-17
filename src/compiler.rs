@@ -112,7 +112,7 @@ impl<'a> Parser<'a> {
             _ => unreachable!(),
         }
     }
-    fn identifier_idx(&mut self, lexeme: Vec<u8>) -> usize {
+    fn identifier_constant(&mut self, lexeme: Vec<u8>) -> usize {
         let identifier = String::from_utf8_lossy(&lexeme).to_string();
         let key = self.heap.allocate_or_intern_string(&identifier);
         self.current_chunk().add_constant(Value::Object(key))
@@ -135,13 +135,42 @@ impl<'a> Parser<'a> {
             == token_variant)
     }
     pub fn declaration(&mut self) -> Result<()> {
-        if self.match_token(TokenType::Fun)? {
+        if self.match_token(TokenType::Class)? {
+            self.class_declaration()?;
+        } else if self.match_token(TokenType::Fun)? {
             self.fun_declaration()?;
         } else if self.match_token(TokenType::Let)? {
             self.let_declaration()?;
         } else {
             self.statement()?;
         }
+        Ok(())
+    }
+    fn class_declaration(&mut self) -> Result<()> {
+        self.consume(TokenType::Identifier, "Expect class name")?;
+        let name_constant = self.identifier_constant(
+            self.previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .lexeme
+                .clone(),
+        );
+        self.declare_variable()?;
+
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+
+        self.current_chunk()
+            .write_instruction(Instruction::Class(name_constant), line);
+
+        self.define_variable(name_constant)?;
+
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body")?;
+        self.consume(TokenType::RightBrace, "Expect '}' after class body")?;
+
         Ok(())
     }
     fn fun_declaration(&mut self) -> Result<()> {
@@ -242,7 +271,7 @@ impl<'a> Parser<'a> {
                 .previous_token
                 .as_ref()
                 .ok_or(CompileError::MissingPreviousToken)?;
-            Ok(self.identifier_idx(previous.lexeme.to_owned()))
+            Ok(self.identifier_constant(previous.lexeme.to_owned()))
         }
     }
     fn declare_variable(&mut self) -> Result<()> {
@@ -565,7 +594,7 @@ impl<'a> Parser<'a> {
             TokenType::And => Precedence::And,
             TokenType::Or => Precedence::Or,
 
-            TokenType::LeftParen => Precedence::Call,
+            TokenType::LeftParen | TokenType::Dot => Precedence::Call,
 
             TokenType::Greater
             | TokenType::GreaterEqual
@@ -595,7 +624,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn execute_infix_parser(&mut self, token_variant: TokenType) -> Result<()> {
+    fn execute_infix_parser(&mut self, token_variant: TokenType, can_assign: bool) -> Result<()> {
         match token_variant {
             TokenType::Minus
             | TokenType::Plus
@@ -613,6 +642,7 @@ impl<'a> Parser<'a> {
             TokenType::Or => self.or(),
 
             TokenType::LeftParen => self.call(),
+            TokenType::Dot => self.dot(can_assign),
 
             _ => {
                 let prev_variant = self
@@ -624,6 +654,39 @@ impl<'a> Parser<'a> {
                 Err(CompileError::MissingInfixParser(prev_variant))
             }
         }
+    }
+
+    fn dot(&mut self, can_assign: bool) -> Result<()> {
+        self.consume(
+            TokenType::Identifier,
+            "Expect property name after '.' in an instance",
+        )?;
+        let name = self.identifier_constant(
+            self.previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .lexeme
+                .clone(),
+        );
+        if can_assign && self.match_token(TokenType::Equal)? {
+            self.expression()?;
+            let line = self
+                .previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .line;
+            self.current_chunk()
+                .write_instruction(Instruction::SetProperty(name), line);
+        } else {
+            let line = self
+                .previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .line;
+            self.current_chunk()
+                .write_instruction(Instruction::GetProperty(name), line);
+        }
+        Ok(())
     }
 
     fn call(&mut self) -> Result<()> {
@@ -725,7 +788,7 @@ impl<'a> Parser<'a> {
                     .write_instruction(Instruction::GetUpvalue(idx), line);
             }
         } else {
-            let idx = self.identifier_idx(token.lexeme);
+            let idx = self.identifier_constant(token.lexeme);
             if can_assign && self.match_token(TokenType::Equal)? {
                 self.expression()?;
                 self.current_chunk()
@@ -912,7 +975,7 @@ impl<'a> Parser<'a> {
                 .as_ref()
                 .ok_or(CompileError::MissingPreviousToken)?
                 .variant;
-            self.execute_infix_parser(prev_variant)?;
+            self.execute_infix_parser(prev_variant, can_assign)?;
         }
         if can_assign && self.match_token(TokenType::Equal)? {
             return Err(CompileError::InvalidAssignmentTarget {

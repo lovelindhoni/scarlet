@@ -201,6 +201,10 @@ impl<'a> VirtualMachine<'a> {
                     self.stack_top -= arg_count + 1;
                     self.push(result);
                 }
+                Object::Class(_) => {
+                    let instance = heap.allocate_instance(key);
+                    self.stack[self.stack_top - arg_count - 1] = Value::Object(instance);
+                }
                 _ => {
                     return Err(InterpretError::UncallableObject);
                 }
@@ -248,6 +252,81 @@ impl<'a> VirtualMachine<'a> {
             diassemble_instruction(chunk, frame.ip);
 
             match instruction {
+                Instruction::GetProperty(pos) => {
+                    let instance_val = stack[self.stack_top - 1];
+
+                    if let Value::Object(instance_key) = instance_val {
+                        let heap = self.heap.as_ref().unwrap();
+
+                        let field_name_key = if let Value::Object(k) = chunk.values[*pos] {
+                            k
+                        } else {
+                            unreachable!()
+                        };
+
+                        match heap.arena.get(instance_key).unwrap() {
+                            Object::Instance(instance) => {
+                                let val = instance.fields.get(&field_name_key).ok_or(
+                                    InterpretError::UndefinedProperty {
+                                        identifier: self.key_to_string(field_name_key),
+                                    },
+                                )?;
+                                self.stack_top -= 1;
+                                self.push(val.to_owned());
+                            }
+                            _ => {
+                                return Err(InterpretError::TypeError {
+                                    message: "Only instances have properties.".to_string(),
+                                });
+                            }
+                        }
+                    } else {
+                        return Err(InterpretError::TypeError {
+                            message: "Only instances have properties.".to_string(),
+                        });
+                    }
+                }
+
+                Instruction::SetProperty(pos) => {
+                    let instance_val = stack[self.stack_top - 2];
+
+                    if let Value::Object(instance_key) = instance_val {
+                        let field_name_key = if let Value::Object(k) = chunk.values[*pos] {
+                            k
+                        } else {
+                            unreachable!()
+                        };
+
+                        let heap = self.heap.as_mut().unwrap();
+
+                        match heap.arena.get_mut(instance_key).unwrap() {
+                            Object::Instance(instance) => {
+                                let value = stack[self.stack_top - 1];
+                                instance.fields.insert(field_name_key, value);
+
+                                let value = self.pop();
+                                self.stack_top -= 1;
+                                self.push(value);
+                            }
+                            _ => {
+                                return Err(InterpretError::TypeError {
+                                    message: "Only instances have fields.".to_string(),
+                                });
+                            }
+                        }
+                    } else {
+                        return Err(InterpretError::TypeError {
+                            message: "Only instances have fields.".to_string(),
+                        });
+                    }
+                }
+                Instruction::Class(slot) => {
+                    let class_name = chunk.values[*slot];
+                    if let Value::Object(name_key) = class_name {
+                        let class_key = self.heap.as_mut().unwrap().allocate_class(name_key);
+                        self.push(Value::Object(class_key));
+                    }
+                }
                 Instruction::GetUpvalue(slot) => {
                     let upvalue_key = if let Object::Closure(c) = self
                         .heap

@@ -79,6 +79,9 @@ pub enum CompileError {
 
 #[derive(Debug, Error)]
 pub enum InterpretError {
+    #[error("Undefined property '{}'", .identifier)]
+    UndefinedProperty { identifier: String },
+
     #[error("Can only call functions and classes")]
     UncallableObject,
 
