@@ -67,6 +67,18 @@ impl Value {
                             unreachable!()
                         }
                     }
+                    Object::BoundMethod(bound_method) => {
+                        if let Object::Closure(closure) =
+                            heap.arena.get(bound_method.method).unwrap()
+                        {
+                            if let Object::Function(function) =
+                                heap.arena.get(closure.function).unwrap()
+                            {
+                                return self.print_function(function, heap);
+                            }
+                        }
+                        unreachable!()
+                    }
                 }
             }
         }
@@ -91,6 +103,8 @@ pub enum Instruction {
     Class(usize),
     GetProperty(usize),
     SetProperty(usize),
+    Method(usize),
+    Invoke(usize, usize),
     CloseUpvalue,
     True,
     False,
@@ -128,10 +142,13 @@ impl Instruction {
 
             Instruction::Call(_) => "CALL",
             Instruction::Closure(_, _) => "CLOSURE",
+            Instruction::Invoke(_, _) => "INVOKE",
 
             Instruction::Class(_) => "CLASS",
             Instruction::GetProperty(_) => "GET_PROPERTY",
             Instruction::SetProperty(_) => "SET_PROPERTY",
+
+            Instruction::Method(_) => "METHOD",
 
             Instruction::CloseUpvalue => "CLOSE_UPVALUE",
 

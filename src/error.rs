@@ -33,6 +33,9 @@ pub enum CompileError {
     #[error("Syntax Error on {0}")]
     Scan(#[from] ScanError),
 
+    #[error("{msg}", msg = compile_error_helper("Can't use 'this' outside of a class.", token))]
+    ThisOutsideClass { token: Token },
+
     #[error("Internal: Missing current token when parsing")]
     MissingCurrentToken,
 
@@ -50,6 +53,9 @@ pub enum CompileError {
 
     #[error("{msg}", msg= compile_error_helper("Can't return from top level code", token))]
     ReturnFromTopLevel { token: Token },
+
+    #[error("{msg}", msg= compile_error_helper("Can't return from class initializer", token))]
+    ReturnFromClassInitializer { token: Token },
 
     #[error("Failed to parse literal {literal} to {to}, source: {source}")]
     LiteralParse {

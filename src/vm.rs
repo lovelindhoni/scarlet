@@ -37,6 +37,7 @@ pub struct VirtualMachine<'a> {
     stack_top: usize,
     heap: Option<&'a mut Heap>,
     open_upvalues: Vec<HeapKey>,
+    init_string: Option<HeapKey>,
 }
 
 impl<'a> VirtualMachine<'a> {
@@ -48,6 +49,7 @@ impl<'a> VirtualMachine<'a> {
             stack_top: 0,
             heap: None,
             open_upvalues: Vec::new(),
+            init_string: None,
         }
     }
 
@@ -93,6 +95,12 @@ impl<'a> VirtualMachine<'a> {
 
     fn mark_vm_roots(&mut self) {
         let heap = self.heap.as_mut().unwrap();
+
+        mark_object(
+            &heap.arena,
+            &mut heap.marked_objects,
+            &self.init_string.unwrap(),
+        );
         for value in &self.stack[..self.stack_top] {
             mark_value(&heap.arena, &mut heap.marked_objects, value);
         }
@@ -202,8 +210,36 @@ impl<'a> VirtualMachine<'a> {
                     self.push(result);
                 }
                 Object::Class(_) => {
-                    let instance = heap.allocate_instance(key);
+                    let maybe_init: Option<HeapKey> = {
+                        let heap = self.heap.as_ref().unwrap();
+                        let Object::Class(class) = heap.arena.get(key).unwrap() else {
+                            unreachable!()
+                        };
+                        let init_key = self.init_string.unwrap();
+                        class.methods.get(&init_key).and_then(|v| {
+                            if let Value::Object(k) = v {
+                                Some(*k)
+                            } else {
+                                None
+                            }
+                        })
+                    };
+
+                    let instance = self.heap.as_mut().unwrap().allocate_instance(key);
                     self.stack[self.stack_top - arg_count - 1] = Value::Object(instance);
+
+                    if let Some(closure_key) = maybe_init {
+                        self.call(closure_key, arg_count)?;
+                    } else if arg_count != 0 {
+                        return Err(InterpretError::ArgumentsCountMismatch {
+                            message: format!("Expected 0 arguments but got {}.", arg_count),
+                        });
+                    }
+                }
+                Object::BoundMethod(bound_method) => {
+                    let method = bound_method.method;
+                    self.stack[self.stack_top - arg_count - 1] = bound_method.receiver;
+                    self.call(method, arg_count)?;
                 }
                 _ => {
                     return Err(InterpretError::UncallableObject);
@@ -211,6 +247,48 @@ impl<'a> VirtualMachine<'a> {
             }
         } else {
             return Err(InterpretError::UncallableObject);
+        }
+        Ok(())
+    }
+
+    fn bind_method(&mut self, class: HeapKey, name: HeapKey) -> Result<()> {
+        let method_val = {
+            let heap = self.heap.as_ref().unwrap();
+            let Object::Class(obj_class) = heap.arena.get(class).unwrap() else {
+                unreachable!()
+            };
+            obj_class.methods.get(&name).copied() // Value is Copy
+        };
+
+        let method_val = method_val.ok_or_else(|| InterpretError::UndefinedProperty {
+            identifier: self.key_to_string(name),
+        })?;
+
+        let Value::Object(method_key) = method_val else {
+            unreachable!("method must be a closure object")
+        };
+
+        let receiver = self.stack[self.stack_top - 1];
+        let bound = self
+            .heap
+            .as_mut()
+            .unwrap()
+            .allocate_bound_method(receiver, method_key);
+
+        self.pop();
+        self.push(Value::Object(bound));
+        Ok(())
+    }
+
+    fn define_method(&mut self, method_name: HeapKey) -> Result<()> {
+        let method = self.stack[self.stack_top - 1];
+        if let Value::Object(obj_key) = &self.stack[self.stack_top - 2] {
+            if let Object::Class(class) =
+                self.heap.as_mut().unwrap().arena.get_mut(*obj_key).unwrap()
+            {
+                class.methods.insert(method_name, method);
+                self.pop();
+            }
         }
         Ok(())
     }
@@ -252,33 +330,109 @@ impl<'a> VirtualMachine<'a> {
             diassemble_instruction(chunk, frame.ip);
 
             match instruction {
-                Instruction::GetProperty(pos) => {
-                    let instance_val = stack[self.stack_top - 1];
+                Instruction::Invoke(name_pos, arg_count) => {
+                    let arg_count = *arg_count;
 
-                    if let Value::Object(instance_key) = instance_val {
+                    let name_key = {
+                        let chunk_val = {
+                            let heap = self.heap.as_ref().unwrap();
+                            let frame =
+                                unsafe { self.frames[self.frame_count - 1].assume_init_ref() };
+                            let function = match heap.arena.get(frame.function_key).unwrap() {
+                                Object::Function(f) => f,
+                                _ => unreachable!(),
+                            };
+                            function.chunk.values[*name_pos]
+                        };
+                        if let Value::Object(k) = chunk_val {
+                            k
+                        } else {
+                            unreachable!()
+                        }
+                    };
+
+                    let receiver = stack[self.stack_top - arg_count - 1];
+
+                    let Value::Object(instance_key) = receiver else {
+                        return Err(InterpretError::TypeError {
+                            message: "Only instances have methods.".to_string(),
+                        });
+                    };
+
+                    let (field_val, class_key) = {
                         let heap = self.heap.as_ref().unwrap();
+                        match heap.arena.get(instance_key).unwrap() {
+                            Object::Instance(instance) => {
+                                (instance.fields.get(&name_key).copied(), instance.class)
+                            }
+                            _ => {
+                                return Err(InterpretError::TypeError {
+                                    message: "Only instances have methods.".to_string(),
+                                });
+                            }
+                        }
+                    };
 
+                    if let Some(field_val) = field_val {
+                        self.stack[self.stack_top - arg_count - 1] = field_val;
+                        self.call_value(arg_count)?;
+                    } else {
+                        let closure_key = {
+                            let heap = self.heap.as_ref().unwrap();
+                            let Object::Class(class) = heap.arena.get(class_key).unwrap() else {
+                                unreachable!()
+                            };
+                            class.methods.get(&name_key).and_then(|v| {
+                                if let Value::Object(k) = v {
+                                    Some(*k)
+                                } else {
+                                    None
+                                }
+                            })
+                        };
+
+                        let closure_key =
+                            closure_key.ok_or_else(|| InterpretError::UndefinedProperty {
+                                identifier: self.key_to_string(name_key),
+                            })?;
+
+                        self.call(closure_key, arg_count)?;
+                    }
+                }
+
+                Instruction::Method(pos) => {
+                    if let Value::Object(method_name_key) = chunk.values[*pos] {
+                        self.define_method(method_name_key)?;
+                    }
+                }
+                Instruction::GetProperty(pos) => {
+                    if let Value::Object(instance_key) = stack[self.stack_top - 1] {
                         let field_name_key = if let Value::Object(k) = chunk.values[*pos] {
                             k
                         } else {
                             unreachable!()
                         };
 
-                        match heap.arena.get(instance_key).unwrap() {
-                            Object::Instance(instance) => {
-                                let val = instance.fields.get(&field_name_key).ok_or(
-                                    InterpretError::UndefinedProperty {
-                                        identifier: self.key_to_string(field_name_key),
-                                    },
-                                )?;
-                                self.stack_top -= 1;
-                                self.push(val.to_owned());
+                        let (field_val, class_key) = {
+                            let heap = self.heap.as_ref().unwrap();
+                            match heap.arena.get(instance_key).unwrap() {
+                                Object::Instance(instance) => (
+                                    instance.fields.get(&field_name_key).copied(),
+                                    instance.class,
+                                ),
+                                _ => {
+                                    return Err(InterpretError::TypeError {
+                                        message: "Only instances have properties.".to_string(),
+                                    });
+                                }
                             }
-                            _ => {
-                                return Err(InterpretError::TypeError {
-                                    message: "Only instances have properties.".to_string(),
-                                });
-                            }
+                        };
+
+                        if let Some(val) = field_val {
+                            self.stack_top -= 1;
+                            self.push(val);
+                        } else {
+                            self.bind_method(class_key, field_name_key)?;
                         }
                     } else {
                         return Err(InterpretError::TypeError {
@@ -596,7 +750,11 @@ impl<'a> VirtualMachine<'a> {
         let closure_key = heap.allocate_closure(function_key, Vec::new());
         self.push(Value::Object(closure_key));
 
+        let init_string_key = heap.allocate_or_intern_string("init");
+
         self.heap = Some(heap);
+        self.init_string = Some(init_string_key);
+
         self.call(closure_key, 0)?;
 
         match self.run() {

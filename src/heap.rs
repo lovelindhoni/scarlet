@@ -33,6 +33,7 @@ pub enum Object {
     Upvalue(ObjUpvalue),
     Class(ObjClass),
     Instance(ObjInstance),
+    BoundMethod(ObjBoundMethod),
 }
 
 #[derive(Debug)]
@@ -63,6 +64,7 @@ impl ObjFunction {
 #[derive(Debug)]
 pub struct ObjClass {
     pub name: HeapKey,
+    pub methods: RapidHashMap<HeapKey, Value>,
 }
 
 #[derive(Debug)]
@@ -86,7 +88,15 @@ pub struct ObjUpvalue {
 #[repr(u8)]
 pub enum FunctionType {
     Function,
+    Method,
+    Initializer,
     Script,
+}
+
+#[derive(Debug)]
+pub struct ObjBoundMethod {
+    pub receiver: Value,
+    pub method: HeapKey, // closure key
 }
 
 pub fn mark_value(
@@ -138,6 +148,12 @@ pub fn mark_object(
             }
             Object::Class(class) => {
                 dfs_stack.push(class.name);
+                for (identifier_key, value) in &class.methods {
+                    dfs_stack.push(*identifier_key);
+                    if let Value::Object(object_key) = value {
+                        dfs_stack.push(*object_key);
+                    }
+                }
             }
             Object::Instance(instance) => {
                 dfs_stack.push(instance.class);
@@ -146,6 +162,12 @@ pub fn mark_object(
                     if let Value::Object(object_key) = value {
                         dfs_stack.push(*object_key);
                     }
+                }
+            }
+            Object::BoundMethod(bound_method) => {
+                dfs_stack.push(bound_method.method);
+                if let Value::Object(object_key) = &bound_method.receiver {
+                    dfs_stack.push(*object_key);
                 }
             }
             _ => {}
@@ -257,7 +279,10 @@ impl Heap {
     }
 
     pub fn allocate_class(&mut self, name: HeapKey) -> HeapKey {
-        let class = ObjClass { name };
+        let class = ObjClass {
+            name,
+            methods: RapidHashMap::new(),
+        };
         self.arena.insert(Object::Class(class))
     }
 
@@ -267,6 +292,11 @@ impl Heap {
             fields: RapidHashMap::new(),
         };
         self.arena.insert(Object::Instance(instance))
+    }
+
+    pub fn allocate_bound_method(&mut self, receiver: Value, method: HeapKey) -> HeapKey {
+        let bound_method = ObjBoundMethod { receiver, method };
+        self.arena.insert(Object::BoundMethod(bound_method))
     }
 
     pub fn concatenate_strings(&mut self, left_key: HeapKey, right_key: HeapKey) -> HeapKey {

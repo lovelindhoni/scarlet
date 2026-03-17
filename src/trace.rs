@@ -116,8 +116,22 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize, heap: &Heap) -> Result<
         | Instruction::Class(pos)
         | Instruction::GetProperty(pos)
         | Instruction::SetProperty(pos)
+        | Instruction::Method(pos)
         | Instruction::DefineGlobal(pos) => {
             constant_instruction(idx, chunk, pos, instruction, heap);
+        }
+
+        Instruction::Invoke(pos, arg_count) => {
+            let line = print_prefix(idx, chunk);
+            println!(
+                "{:04} {:>4} {:<16} {:4} ({} args) '{:?}'",
+                idx,
+                line,
+                instruction.opcode(),
+                pos,
+                arg_count,
+                chunk.values[*pos].display(heap)
+            );
         }
 
         Instruction::Closure(pos, upvalues) => {

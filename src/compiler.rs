@@ -78,29 +78,42 @@ struct Compiler {
 
 impl Compiler {
     pub fn new(function_key: HeapKey, function_type: FunctionType) -> Self {
-        let locals = vec![Local::new(
-            Token {
-                variant: TokenType::Nil,
-                lexeme: Vec::new(),
-                line: 0,
-            },
-            0,
-        )];
+        let local = match function_type {
+            FunctionType::Method | FunctionType::Initializer => Local::new(
+                Token {
+                    variant: TokenType::This,
+                    lexeme: b"this".to_vec(),
+                    line: 0,
+                },
+                0,
+            ),
+            _ => Local::new(
+                Token {
+                    variant: TokenType::Nil,
+                    lexeme: Vec::new(),
+                    line: 0,
+                },
+                0,
+            ),
+        };
         Compiler {
             function: function_key,
             function_type,
-            locals,
+            locals: vec![local],
             scope_depth: 0,
             upvalues: Vec::new(),
         }
     }
 }
 
+struct ClassCompiler {}
+
 struct Parser<'a> {
     previous_token: Option<Token>,
     current_token: Option<Token>,
     scanner: Scanner,
     compilers: Vec<Compiler>,
+    class_compilers: Vec<ClassCompiler>,
     heap: &'a mut Heap,
 }
 
@@ -148,6 +161,11 @@ impl<'a> Parser<'a> {
     }
     fn class_declaration(&mut self) -> Result<()> {
         self.consume(TokenType::Identifier, "Expect class name")?;
+        let class_name = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .to_owned();
         let name_constant = self.identifier_constant(
             self.previous_token
                 .as_ref()
@@ -168,11 +186,61 @@ impl<'a> Parser<'a> {
 
         self.define_variable(name_constant)?;
 
+        self.named_variable(class_name, false)?;
+
+        self.class_compilers.push(ClassCompiler {});
         self.consume(TokenType::LeftBrace, "Expect '{' before class body")?;
+
+        while !self.check(TokenType::RightBrace)? && !self.check(TokenType::Eof)? {
+            self.method()?;
+        }
+
         self.consume(TokenType::RightBrace, "Expect '}' after class body")?;
 
+        self.class_compilers.pop();
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.current_chunk()
+            .write_instruction(Instruction::Pop, line);
         Ok(())
     }
+
+    fn method(&mut self) -> Result<()> {
+        self.consume(TokenType::Identifier, "Expect method name")?;
+        let constant = self.identifier_constant(
+            self.previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .lexeme
+                .clone(),
+        );
+        let mut function_type = FunctionType::Method;
+        if str::from_utf8(
+            &self
+                .previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .lexeme,
+        )
+        .map_err(|e| CompileError::InvalidUtf8 { source: e })?
+            == "init"
+        {
+            function_type = FunctionType::Initializer;
+        }
+        self.function(function_type)?;
+        let line = self
+            .previous_token
+            .as_ref()
+            .ok_or(CompileError::MissingPreviousToken)?
+            .line;
+        self.current_chunk()
+            .write_instruction(Instruction::Method(constant), line);
+        Ok(())
+    }
+
     fn fun_declaration(&mut self) -> Result<()> {
         let function_name = self.parse_variable("Expect function name")?;
         self.mark_intialized()?;
@@ -249,6 +317,15 @@ impl<'a> Parser<'a> {
         if self.match_token(TokenType::Semicolon)? {
             self.emit_return()?;
         } else {
+            if let FunctionType::Initializer = self.current_compiler().function_type {
+                return Err(CompileError::ReturnFromClassInitializer {
+                    token: self
+                        .previous_token
+                        .as_ref()
+                        .ok_or(CompileError::MissingPreviousToken)?
+                        .to_owned(),
+                });
+            }
             self.expression()?;
             self.consume(TokenType::Semicolon, "Expect ';' after return value")?;
             let line = self
@@ -613,6 +690,8 @@ impl<'a> Parser<'a> {
             TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::True | TokenType::False | TokenType::Nil => self.literal(),
 
+            TokenType::This => self.this(),
+
             _ => Err(CompileError::MissingPrefixParser {
                 message: "Expect expression".to_owned(),
                 token: self
@@ -622,6 +701,20 @@ impl<'a> Parser<'a> {
                     .clone(),
             }),
         }
+    }
+
+    fn this(&mut self) -> Result<()> {
+        if self.class_compilers.is_empty() {
+            return Err(CompileError::ThisOutsideClass {
+                token: self
+                    .previous_token
+                    .as_ref()
+                    .ok_or(CompileError::MissingPreviousToken)?
+                    .to_owned(),
+            });
+        }
+        self.variable(false)?;
+        Ok(())
     }
 
     fn execute_infix_parser(&mut self, token_variant: TokenType, can_assign: bool) -> Result<()> {
@@ -677,6 +770,15 @@ impl<'a> Parser<'a> {
                 .line;
             self.current_chunk()
                 .write_instruction(Instruction::SetProperty(name), line);
+        } else if self.match_token(TokenType::LeftParen)? {
+            let arg_count = self.argument_list()?;
+            let line = self
+                .previous_token
+                .as_ref()
+                .ok_or(CompileError::MissingPreviousToken)?
+                .line;
+            self.current_chunk()
+                .write_instruction(Instruction::Invoke(name, arg_count), line);
         } else {
             let line = self
                 .previous_token
@@ -1052,8 +1154,13 @@ impl<'a> Parser<'a> {
             .as_ref()
             .ok_or(CompileError::MissingPreviousToken)?
             .line;
-        self.current_chunk()
-            .write_instruction(Instruction::Nil, line);
+        if let FunctionType::Initializer = self.current_compiler().function_type {
+            self.current_chunk()
+                .write_instruction(Instruction::GetLocal(0), line);
+        } else {
+            self.current_chunk()
+                .write_instruction(Instruction::Nil, line);
+        }
         self.current_chunk()
             .write_instruction(Instruction::Return, line);
         Ok(())
@@ -1067,6 +1174,7 @@ impl<'a> Parser<'a> {
             scanner,
             heap,
             compilers,
+            class_compilers: Vec::new(),
         }
     }
     fn current_compiler(&self) -> &Compiler {

@@ -95,7 +95,7 @@ fn type_of(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
                 Object::Upvalue(_) => "upvalue",
                 Object::String(_) => "string",
                 Object::Class(_) => "class",
-                Object::Function(_) | Object::Closure(_) => "function",
+                Object::Function(_) | Object::Closure(_) | Object::BoundMethod(_) => "function",
                 Object::Instance(_) => "instance",
             }
         }
