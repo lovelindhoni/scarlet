@@ -1020,7 +1020,10 @@ impl<'a> Parser<'a> {
                         return i;
                     }
                 }
-                compiler.upvalues.push(Upvalue::new(local_idx, is_local));
+                compiler.upvalues.push(Upvalue {
+                    is_local,
+                    index: local_idx,
+                });
                 upvalue_count
             }
             _ => unreachable!(),

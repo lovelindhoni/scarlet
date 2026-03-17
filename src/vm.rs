@@ -85,7 +85,7 @@ impl<'a> VirtualMachine<'a> {
         if bytes_allocated >= next_gc_run {
             self.heap.as_mut().unwrap().mark_globals();
             self.mark_vm_roots();
-            self.heap.as_mut().unwrap().mark_interned_strings();
+            self.heap.as_mut().unwrap().sweep_interned_strings();
             self.heap.as_mut().unwrap().sweep();
             let heap = self.heap.as_mut().unwrap();
             heap.next_gc_run =

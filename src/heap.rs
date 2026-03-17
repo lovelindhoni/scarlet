@@ -3,25 +3,21 @@ use slotmap::{SecondaryMap, SlotMap, new_key_type};
 
 use crate::{chunk::Chunk, common::Value};
 
-pub const BASE_GC_TRIGGER: usize = 10 * 1024 * 1024;
+use std::mem::size_of;
 
-pub type NativeFn =
-    fn(name: &'static str, args: &[Value], heap: &mut Heap) -> Result<Value, String>;
+pub const BASE_GC_TRIGGER: usize = 10 * 1024 * 1024;
 
 new_key_type! {
     pub struct HeapKey;
 }
 
+pub type NativeFn =
+    fn(name: &'static str, args: &[Value], heap: &mut Heap) -> Result<Value, String>;
+
 #[derive(Clone)]
 pub struct Upvalue {
     pub index: usize,
     pub is_local: bool,
-}
-
-impl Upvalue {
-    pub fn new(index: usize, is_local: bool) -> Self {
-        Self { index, is_local }
-    }
 }
 
 pub enum Object {
@@ -50,12 +46,6 @@ pub struct ObjClosure {
 pub struct NativeObjFunction {
     pub name: &'static str,
     pub function: NativeFn,
-}
-
-impl ObjFunction {
-    pub fn new(arity: u64, chunk: Chunk, name: Option<HeapKey>) -> Self {
-        Self { arity, chunk, name }
-    }
 }
 
 pub struct ObjClass {
@@ -190,13 +180,12 @@ impl Heap {
 
     pub fn mark_globals(&mut self) {
         for (identifier_key, value) in &self.globals {
-            // the key here points to the variable identifier string, so we mark it
             mark_object(&self.arena, &mut self.marked_objects, identifier_key);
             mark_value(&self.arena, &mut self.marked_objects, value);
         }
     }
 
-    pub fn mark_interned_strings(&mut self) {
+    pub fn sweep_interned_strings(&mut self) {
         self.intern_table
             .retain(|_, key| self.marked_objects.contains_key(*key));
     }
@@ -207,12 +196,11 @@ impl Heap {
             .iter()
             .filter(|(key, _)| !self.marked_objects.contains_key(*key))
             .map(|(_, obj)| match obj {
-                Object::String(s) => std::mem::size_of::<Object>() + s.capacity(),
+                Object::String(s) => size_of::<Object>() + s.capacity(),
                 Object::Closure(c) => {
-                    std::mem::size_of::<Object>()
-                        + (c.upvalues.capacity() * std::mem::size_of::<HeapKey>())
+                    size_of::<Object>() + (c.upvalues.capacity() * size_of::<HeapKey>())
                 }
-                _ => std::mem::size_of::<Object>(),
+                _ => size_of::<Object>(),
             })
             .sum();
         self.bytes_allocated -= freed;
@@ -232,21 +220,24 @@ impl Heap {
         } else {
             None
         };
-        self.bytes_allocated += std::mem::size_of::<Object>();
-        let function = Object::Function(ObjFunction::new(0, Chunk::new(), function_name));
+        self.bytes_allocated += size_of::<Object>();
+        let function = Object::Function(ObjFunction {
+            arity: 0,
+            chunk: Chunk::new(),
+            name: function_name,
+        });
         self.arena.insert(function)
     }
 
     pub fn allocate_closure(&mut self, function: HeapKey, upvalues: Vec<HeapKey>) -> HeapKey {
-        self.bytes_allocated +=
-            std::mem::size_of::<Object>() + (upvalues.capacity() * std::mem::size_of::<HeapKey>());
+        self.bytes_allocated += size_of::<Object>() + (upvalues.capacity() * size_of::<HeapKey>());
         // takes a normal function key and returns a closure key
         let closure = ObjClosure { function, upvalues };
         self.arena.insert(Object::Closure(closure))
     }
 
     pub fn allocate_native_function(&mut self, name: &'static str, function: NativeFn) -> HeapKey {
-        self.bytes_allocated += std::mem::size_of::<Object>();
+        self.bytes_allocated += size_of::<Object>();
         let object = Object::NativeFunction(NativeObjFunction { name, function });
         self.arena.insert(object)
     }
@@ -256,7 +247,7 @@ impl Heap {
             key
         } else {
             let string = string.to_owned();
-            self.bytes_allocated += std::mem::size_of::<Object>() + string.capacity();
+            self.bytes_allocated += size_of::<Object>() + string.capacity();
             let key = self.arena.insert(Object::String(string.clone()));
             self.intern_table.insert(string, key);
             key
@@ -264,7 +255,7 @@ impl Heap {
     }
 
     pub fn allocate_upvalue(&mut self, slot: usize) -> HeapKey {
-        self.bytes_allocated += std::mem::size_of::<Object>();
+        self.bytes_allocated += size_of::<Object>();
         self.arena.insert(Object::Upvalue(ObjUpvalue {
             state: UpvalueState::Open(slot),
         }))
@@ -292,16 +283,13 @@ impl Heap {
     }
 
     pub fn concatenate_strings(&mut self, left_key: HeapKey, right_key: HeapKey) -> HeapKey {
-        let left_str = match self.arena.get(left_key) {
-            Some(Object::String(value)) => value,
-            _ => unreachable!(),
+        let Some(Object::String(left_str)) = self.arena.get(left_key) else {
+            unreachable!();
         };
-        let right_str = match self.arena.get(right_key) {
-            Some(Object::String(value)) => value,
-            _ => unreachable!(),
+        let Some(Object::String(right_str)) = self.arena.get(right_key) else {
+            unreachable!();
         };
         let result_str = format!("{}{}", left_str, right_str);
-
         self.allocate_or_intern_string(&result_str)
     }
 }
