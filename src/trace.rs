@@ -1,7 +1,7 @@
 use crate::chunk::Chunk;
 use crate::common::Instruction;
 use crate::error::TraceError;
-use crate::heap::{Heap, HeapKey, Object};
+use crate::heap::{Heap, HeapKey};
 
 type Result<T> = std::result::Result<T, TraceError>;
 
@@ -83,17 +83,13 @@ fn byte_instruction(idx: usize, chunk: &Chunk, pos: &usize, instruction: &Instru
 }
 
 pub fn diassemble(function_key: HeapKey, heap: &Heap) -> Result<()> {
-    let (chunk, function_name_key) = match heap.arena.get(function_key).unwrap() {
-        Object::Function(function) => (&function.chunk, &function.name),
-        _ => unreachable!(),
-    };
+    let function = heap.get_function(function_key);
+    let chunk = &function.chunk;
+    let function_name_key = function.name;
     println!(
         "Disassembling Function: {}",
         if let Some(function_name_key) = function_name_key {
-            match heap.arena.get(*function_name_key).unwrap() {
-                Object::String(value) => value,
-                _ => unreachable!(),
-            }
+            heap.get_string(function_name_key)
         } else {
             "<script>"
         }

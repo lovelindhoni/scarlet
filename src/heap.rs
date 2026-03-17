@@ -178,42 +178,6 @@ impl Heap {
         }
     }
 
-    pub fn mark_globals(&mut self) {
-        for (identifier_key, value) in &self.globals {
-            mark_object(&self.arena, &mut self.marked_objects, identifier_key);
-            mark_value(&self.arena, &mut self.marked_objects, value);
-        }
-    }
-
-    pub fn sweep_interned_strings(&mut self) {
-        self.intern_table
-            .retain(|_, key| self.marked_objects.contains_key(*key));
-    }
-
-    pub fn sweep(&mut self) {
-        let freed: usize = self
-            .arena
-            .iter()
-            .filter(|(key, _)| !self.marked_objects.contains_key(*key))
-            .map(|(_, obj)| match obj {
-                Object::String(s) => size_of::<Object>() + s.capacity(),
-                Object::Closure(c) => {
-                    size_of::<Object>() + (c.upvalues.capacity() * size_of::<HeapKey>())
-                }
-                _ => size_of::<Object>(),
-            })
-            .sum();
-        self.bytes_allocated -= freed;
-
-        self.arena.retain(|heap_key, _| {
-            let is_marked = self.marked_objects.contains_key(heap_key);
-            if is_marked {
-                self.marked_objects.remove(heap_key);
-            }
-            is_marked
-        });
-    }
-
     pub fn allocate_function(&mut self, name: Option<String>) -> HeapKey {
         let function_name = if let Some(name) = name {
             Some(self.allocate_or_intern_string(&name))
@@ -283,13 +247,122 @@ impl Heap {
     }
 
     pub fn concatenate_strings(&mut self, left_key: HeapKey, right_key: HeapKey) -> HeapKey {
-        let Some(Object::String(left_str)) = self.arena.get(left_key) else {
-            unreachable!();
-        };
-        let Some(Object::String(right_str)) = self.arena.get(right_key) else {
-            unreachable!();
-        };
+        let left_str = self.get_string(left_key);
+        let right_str = self.get_string(right_key);
         let result_str = format!("{}{}", left_str, right_str);
         self.allocate_or_intern_string(&result_str)
+    }
+}
+
+// GC related methods
+impl Heap {
+    pub fn mark_globals(&mut self) {
+        for (identifier_key, value) in &self.globals {
+            mark_object(&self.arena, &mut self.marked_objects, identifier_key);
+            mark_value(&self.arena, &mut self.marked_objects, value);
+        }
+    }
+
+    pub fn sweep(&mut self) {
+        self.intern_table
+            .retain(|_, key| self.marked_objects.contains_key(*key));
+
+        let freed: usize = self
+            .arena
+            .iter()
+            .filter(|(key, _)| !self.marked_objects.contains_key(*key))
+            .map(|(_, obj)| match obj {
+                Object::String(s) => size_of::<Object>() + s.capacity(),
+                Object::Closure(c) => {
+                    size_of::<Object>() + (c.upvalues.capacity() * size_of::<HeapKey>())
+                }
+                _ => size_of::<Object>(),
+            })
+            .sum();
+        self.bytes_allocated -= freed;
+
+        self.arena.retain(|heap_key, _| {
+            let is_marked = self.marked_objects.contains_key(heap_key);
+            if is_marked {
+                self.marked_objects.remove(heap_key);
+            }
+            is_marked
+        });
+    }
+}
+
+impl Heap {
+    #[inline(always)]
+    pub fn get_obj(&self, key: HeapKey) -> &Object {
+        self.arena.get(key).unwrap()
+    }
+
+    #[inline(always)]
+    fn get_obj_mut(&mut self, key: HeapKey) -> &mut Object {
+        self.arena.get_mut(key).unwrap()
+    }
+
+    #[inline(always)]
+    pub fn get_string(&self, key: HeapKey) -> &String {
+        match self.get_obj(key) {
+            Object::String(s) => s,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_function(&self, key: HeapKey) -> &ObjFunction {
+        match self.get_obj(key) {
+            Object::Function(f) => f,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_closure(&self, key: HeapKey) -> &ObjClosure {
+        match self.get_obj(key) {
+            Object::Closure(c) => c,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_class(&self, key: HeapKey) -> &ObjClass {
+        match self.get_obj(key) {
+            Object::Class(c) => c,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_upvalue(&self, key: HeapKey) -> &ObjUpvalue {
+        match self.get_obj(key) {
+            Object::Upvalue(u) => u,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_mut_class(&mut self, key: HeapKey) -> &mut ObjClass {
+        match self.get_obj_mut(key) {
+            Object::Class(c) => c,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_mut_function(&mut self, key: HeapKey) -> &mut ObjFunction {
+        match self.get_obj_mut(key) {
+            Object::Function(c) => c,
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_mut_upvalue(&mut self, key: HeapKey) -> &mut ObjUpvalue {
+        match self.get_obj_mut(key) {
+            Object::Upvalue(u) => u,
+            _ => unreachable!(),
+        }
     }
 }

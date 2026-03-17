@@ -160,7 +160,7 @@ fn to_number(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
             return Err(format!("{}() can't convert 'nil' into 'number'", fn_name));
         }
         Value::Object(key) => {
-            let object = heap.arena.get(key).unwrap();
+            let object = heap.get_obj(key);
             match object {
                 Object::String(string) => match string.parse::<f64>() {
                     Ok(n) => n,

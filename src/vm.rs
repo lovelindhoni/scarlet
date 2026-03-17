@@ -1,6 +1,6 @@
 use std::mem::MaybeUninit;
 
-use crate::common::{Instruction, Value};
+use crate::common::{Instruction, Value, get_obj_key};
 use crate::error::InterpretError;
 use crate::heap::{BASE_GC_TRIGGER, Heap, HeapKey, Object, UpvalueState, mark_object, mark_value};
 #[cfg(feature = "trace")]
@@ -85,7 +85,6 @@ impl<'a> VirtualMachine<'a> {
         if bytes_allocated >= next_gc_run {
             self.heap.as_mut().unwrap().mark_globals();
             self.mark_vm_roots();
-            self.heap.as_mut().unwrap().sweep_interned_strings();
             self.heap.as_mut().unwrap().sweep();
             let heap = self.heap.as_mut().unwrap();
             heap.next_gc_run =
@@ -114,12 +113,11 @@ impl<'a> VirtualMachine<'a> {
     }
 
     fn capture_upvalue(&mut self, stack_idx: usize) -> HeapKey {
-        for &key in &self.open_upvalues {
-            if let Object::Upvalue(uv) = self.heap.as_ref().unwrap().arena.get(key).unwrap() {
-                if let UpvalueState::Open(loc) = uv.state {
-                    if loc == stack_idx {
-                        return key;
-                    }
+        for &uv_key in &self.open_upvalues {
+            let upvalue = self.heap.as_ref().unwrap().get_upvalue(uv_key);
+            if let UpvalueState::Open(loc) = upvalue.state {
+                if loc == stack_idx {
+                    return uv_key;
                 }
             }
         }
@@ -128,7 +126,7 @@ impl<'a> VirtualMachine<'a> {
             .open_upvalues
             .iter()
             .position(|&k| {
-                if let Object::Upvalue(uv) = self.heap.as_ref().unwrap().arena.get(k).unwrap() {
+                if let Object::Upvalue(uv) = self.heap.as_ref().unwrap().get_obj(k) {
                     if let UpvalueState::Open(loc) = uv.state {
                         loc < stack_idx
                     } else {
@@ -144,24 +142,12 @@ impl<'a> VirtualMachine<'a> {
     }
 
     #[inline]
-    // TODO: might let call_value absorb this function within itself, because it does an extra heap lookup
     fn call(&mut self, closure_key: HeapKey, arg_count: usize) -> Result<()> {
         let heap = self.heap.as_ref().unwrap();
+        let function_key = heap.get_closure(closure_key).function;
+        let object = heap.get_obj(function_key);
 
-        let function_key = match heap
-            .arena
-            .get(closure_key)
-            .expect("closure missing from arena")
-        {
-            Object::Closure(closure) => closure.function,
-            _ => unreachable!(),
-        };
-
-        match heap
-            .arena
-            .get(function_key)
-            .expect("function missing from arena")
-        {
+        match object {
             Object::Function(function) => {
                 if function.arity as usize != arg_count {
                     return Err(InterpretError::ArgumentsCountMismatch {
@@ -177,7 +163,7 @@ impl<'a> VirtualMachine<'a> {
                 self.push_frame(frame);
                 Ok(())
             }
-            _ => Err(InterpretError::UncallableObject {}),
+            _ => Err(InterpretError::UncallableObject),
         }
     }
 
@@ -188,11 +174,10 @@ impl<'a> VirtualMachine<'a> {
 
         if let Value::Object(key) = callee {
             let heap = self.heap.as_mut().unwrap();
-            let object = heap.arena.get(key).unwrap();
+            let object = heap.get_obj(key);
 
             match object {
                 Object::Function(_) => {
-                    // because every user defined function is now wrapped in a closure
                     unreachable!()
                 }
                 Object::Closure(_closure) => {
@@ -212,9 +197,7 @@ impl<'a> VirtualMachine<'a> {
                 Object::Class(_) => {
                     let maybe_init: Option<HeapKey> = {
                         let heap = self.heap.as_ref().unwrap();
-                        let Object::Class(class) = heap.arena.get(key).unwrap() else {
-                            unreachable!()
-                        };
+                        let class = heap.get_class(key);
                         let init_key = self.init_string.unwrap();
                         class.methods.get(&init_key).and_then(|v| {
                             if let Value::Object(k) = v {
@@ -253,20 +236,15 @@ impl<'a> VirtualMachine<'a> {
 
     fn bind_method(&mut self, class: HeapKey, name: HeapKey) -> Result<()> {
         let method_val = {
-            let heap = self.heap.as_ref().unwrap();
-            let Object::Class(obj_class) = heap.arena.get(class).unwrap() else {
-                unreachable!()
-            };
-            obj_class.methods.get(&name).copied() // Value is Copy
+            let obj_class = self.heap.as_ref().unwrap().get_class(class);
+            obj_class.methods.get(&name).copied()
         };
 
         let method_val = method_val.ok_or_else(|| InterpretError::UndefinedProperty {
             identifier: self.key_to_string(name),
         })?;
 
-        let Value::Object(method_key) = method_val else {
-            unreachable!("method must be a closure object")
-        };
+        let method_key = get_obj_key(&method_val);
 
         let receiver = self.stack[self.stack_top - 1];
         let bound = self
@@ -282,14 +260,10 @@ impl<'a> VirtualMachine<'a> {
 
     fn define_method(&mut self, method_name: HeapKey) -> Result<()> {
         let method = self.stack[self.stack_top - 1];
-        if let Value::Object(obj_key) = &self.stack[self.stack_top - 2] {
-            if let Object::Class(class) =
-                self.heap.as_mut().unwrap().arena.get_mut(*obj_key).unwrap()
-            {
-                class.methods.insert(method_name, method);
-                self.pop();
-            }
-        }
+        let obj_key = get_obj_key(&self.stack[self.stack_top - 2]);
+        let class = self.heap.as_mut().unwrap().get_mut_class(obj_key);
+        class.methods.insert(method_name, method);
+        self.pop();
         Ok(())
     }
 
@@ -336,14 +310,8 @@ impl<'a> VirtualMachine<'a> {
                     let name_key = {
                         let heap = self.heap.as_ref().unwrap();
                         let frame = unsafe { self.frames[self.frame_count - 1].assume_init_ref() };
-                        let function = match heap.arena.get(frame.function_key).unwrap() {
-                            Object::Function(f) => f,
-                            _ => unreachable!(),
-                        };
-                        match function.chunk.values[*name_pos] {
-                            Value::Object(k) => k,
-                            _ => unreachable!(),
-                        }
+                        let function = heap.get_function(frame.function_key);
+                        get_obj_key(&function.chunk.values[*name_pos])
                     };
 
                     let Value::Object(superclass_key) = self.pop() else {
@@ -377,12 +345,8 @@ impl<'a> VirtualMachine<'a> {
                     self.call(closure_key, arg_count)?;
                 }
                 Instruction::GetSuper(pos) => {
-                    let Value::Object(name) = chunk.values[*pos] else {
-                        unreachable!()
-                    };
-                    let Value::Object(super_class) = self.pop() else {
-                        unreachable!();
-                    };
+                    let name = get_obj_key(&chunk.values[*pos]);
+                    let super_class = get_obj_key(&self.pop());
                     self.bind_method(super_class, name)?;
                 }
                 Instruction::Inherit => {
@@ -394,13 +358,18 @@ impl<'a> VirtualMachine<'a> {
                             message: "Superclass must be a class.".to_string(),
                         });
                     };
-                    let Value::Object(subclass_key) = subclass_val else {
-                        unreachable!()
-                    };
+                    let subclass_key = get_obj_key(&subclass_val);
 
                     {
-                        let heap = self.heap.as_ref().unwrap();
-                        if !matches!(heap.arena.get(superclass_key).unwrap(), Object::Class(_)) {
+                        if !matches!(
+                            self.heap
+                                .as_ref()
+                                .unwrap()
+                                .arena
+                                .get(superclass_key)
+                                .unwrap(),
+                            Object::Class(_)
+                        ) {
                             return Err(InterpretError::TypeError {
                                 message: "Superclass must be a class.".to_string(),
                             });
@@ -408,20 +377,12 @@ impl<'a> VirtualMachine<'a> {
                     }
 
                     let methods_to_copy: Vec<(HeapKey, Value)> = {
-                        let heap = self.heap.as_ref().unwrap();
-                        let Object::Class(superclass) = heap.arena.get(superclass_key).unwrap()
-                        else {
-                            unreachable!()
-                        };
+                        let superclass = self.heap.as_ref().unwrap().get_class(superclass_key);
                         superclass.methods.iter().map(|(&k, &v)| (k, v)).collect()
                     };
 
                     {
-                        let heap = self.heap.as_mut().unwrap();
-                        let Object::Class(subclass) = heap.arena.get_mut(subclass_key).unwrap()
-                        else {
-                            unreachable!()
-                        };
+                        let subclass = self.heap.as_mut().unwrap().get_mut_class(subclass_key);
                         for (name_key, method_val) in methods_to_copy {
                             subclass.methods.entry(name_key).or_insert(method_val);
                         }
@@ -437,17 +398,10 @@ impl<'a> VirtualMachine<'a> {
                             let heap = self.heap.as_ref().unwrap();
                             let frame =
                                 unsafe { self.frames[self.frame_count - 1].assume_init_ref() };
-                            let function = match heap.arena.get(frame.function_key).unwrap() {
-                                Object::Function(f) => f,
-                                _ => unreachable!(),
-                            };
+                            let function = heap.get_function(frame.function_key);
                             function.chunk.values[*name_pos]
                         };
-                        if let Value::Object(k) = chunk_val {
-                            k
-                        } else {
-                            unreachable!()
-                        }
+                        get_obj_key(&chunk_val)
                     };
 
                     let receiver = stack[self.stack_top - arg_count - 1];
@@ -459,8 +413,7 @@ impl<'a> VirtualMachine<'a> {
                     };
 
                     let (field_val, class_key) = {
-                        let heap = self.heap.as_ref().unwrap();
-                        match heap.arena.get(instance_key).unwrap() {
+                        match self.heap.as_ref().unwrap().arena.get(instance_key).unwrap() {
                             Object::Instance(instance) => {
                                 (instance.fields.get(&name_key).copied(), instance.class)
                             }
@@ -477,10 +430,7 @@ impl<'a> VirtualMachine<'a> {
                         self.call_value(arg_count)?;
                     } else {
                         let closure_key = {
-                            let heap = self.heap.as_ref().unwrap();
-                            let Object::Class(class) = heap.arena.get(class_key).unwrap() else {
-                                unreachable!()
-                            };
+                            let class = self.heap.as_ref().unwrap().get_class(class_key);
                             class.methods.get(&name_key).and_then(|v| {
                                 if let Value::Object(k) = v {
                                     Some(*k)
@@ -500,17 +450,12 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::Method(pos) => {
-                    if let Value::Object(method_name_key) = chunk.values[*pos] {
-                        self.define_method(method_name_key)?;
-                    }
+                    let method_name_key = get_obj_key(&chunk.values[*pos]);
+                    self.define_method(method_name_key)?;
                 }
                 Instruction::GetProperty(pos) => {
                     if let Value::Object(instance_key) = stack[self.stack_top - 1] {
-                        let field_name_key = if let Value::Object(k) = chunk.values[*pos] {
-                            k
-                        } else {
-                            unreachable!()
-                        };
+                        let field_name_key = get_obj_key(&chunk.values[*pos]);
 
                         let (field_val, class_key) = {
                             let heap = self.heap.as_ref().unwrap();
@@ -544,11 +489,7 @@ impl<'a> VirtualMachine<'a> {
                     let instance_val = stack[self.stack_top - 2];
 
                     if let Value::Object(instance_key) = instance_val {
-                        let field_name_key = if let Value::Object(k) = chunk.values[*pos] {
-                            k
-                        } else {
-                            unreachable!()
-                        };
+                        let field_name_key = get_obj_key(&chunk.values[*pos]);
 
                         let heap = self.heap.as_mut().unwrap();
 
@@ -575,63 +516,30 @@ impl<'a> VirtualMachine<'a> {
                 }
                 Instruction::Class(slot) => {
                     let class_name = chunk.values[*slot];
-                    if let Value::Object(name_key) = class_name {
-                        let class_key = self.heap.as_mut().unwrap().allocate_class(name_key);
-                        self.push(Value::Object(class_key));
-                    }
+                    let name_key = get_obj_key(&class_name);
+                    let class_key = self.heap.as_mut().unwrap().allocate_class(name_key);
+                    self.push(Value::Object(class_key));
                 }
                 Instruction::GetUpvalue(slot) => {
-                    let upvalue_key = if let Object::Closure(c) = self
-                        .heap
-                        .as_ref()
-                        .unwrap()
-                        .arena
-                        .get(frame.closure)
-                        .unwrap()
-                    {
-                        c.upvalues[*slot]
-                    } else {
-                        unreachable!()
+                    let heap = self.heap.as_ref().unwrap();
+                    let upvalue_key = heap.get_closure(frame.closure).upvalues[*slot];
+                    let uv = heap.get_upvalue(upvalue_key);
+                    let val = match uv.state {
+                        UpvalueState::Open(idx) => stack[idx],
+                        UpvalueState::Closed(v) => v,
                     };
-
-                    let val = match &self.heap.as_ref().unwrap().arena.get(upvalue_key).unwrap() {
-                        Object::Upvalue(uv) => match uv.state {
-                            UpvalueState::Open(idx) => stack[idx],
-                            UpvalueState::Closed(v) => v,
-                        },
-                        _ => unreachable!(),
-                    };
-                    stack[self.stack_top] = val;
-                    self.stack_top += 1;
+                    self.push(val);
                 }
 
                 Instruction::SetUpvalue(slot) => {
-                    let upvalue_key = if let Object::Closure(c) = self
-                        .heap
-                        .as_ref()
-                        .unwrap()
-                        .arena
-                        .get(frame.closure)
-                        .unwrap()
-                    {
-                        c.upvalues[*slot]
-                    } else {
-                        unreachable!()
-                    };
+                    let heap = self.heap.as_ref().unwrap();
+                    let upvalue_key = heap.get_closure(frame.closure).upvalues[*slot];
 
                     let val = stack[self.stack_top - 1];
-                    if let Object::Upvalue(uv) = self
-                        .heap
-                        .as_mut()
-                        .unwrap()
-                        .arena
-                        .get_mut(upvalue_key)
-                        .unwrap()
-                    {
-                        match &mut uv.state {
-                            UpvalueState::Open(idx) => self.stack[*idx] = val,
-                            UpvalueState::Closed(v) => *v = val,
-                        }
+                    let uv = self.heap.as_mut().unwrap().get_mut_upvalue(upvalue_key);
+                    match &mut uv.state {
+                        UpvalueState::Open(idx) => self.stack[*idx] = val,
+                        UpvalueState::Closed(v) => *v = val,
                     }
                 }
 
@@ -647,29 +555,24 @@ impl<'a> VirtualMachine<'a> {
                     let slot_start = frame.slot_start;
                     let closure_key = frame.closure;
 
-                    if let Value::Object(function_key) = value {
-                        let mut upvalue_keys = Vec::new();
-                        for uv in upvalues.iter() {
-                            let key = if uv.is_local {
-                                let stack_idx = slot_start + uv.index;
-                                self.capture_upvalue(stack_idx)
-                            } else {
-                                let heap = self.heap.as_ref().unwrap();
-                                if let Object::Closure(c) = heap.arena.get(closure_key).unwrap() {
-                                    c.upvalues[uv.index]
-                                } else {
-                                    unreachable!()
-                                }
-                            };
-                            upvalue_keys.push(key);
-                        }
-                        let closure_key = self
-                            .heap
-                            .as_mut()
-                            .unwrap()
-                            .allocate_closure(function_key, upvalue_keys);
-                        self.push(Value::Object(closure_key));
+                    let function_key = get_obj_key(&value);
+                    let mut upvalue_keys = Vec::new();
+                    for uv in upvalues.iter() {
+                        let key = if uv.is_local {
+                            let stack_idx = slot_start + uv.index;
+                            self.capture_upvalue(stack_idx)
+                        } else {
+                            let c = self.heap.as_ref().unwrap().get_closure(closure_key);
+                            c.upvalues[uv.index]
+                        };
+                        upvalue_keys.push(key);
                     }
+                    let closure_key = self
+                        .heap
+                        .as_mut()
+                        .unwrap()
+                        .allocate_closure(function_key, upvalue_keys);
+                    self.push(Value::Object(closure_key));
                 }
 
                 Instruction::Call(arg_count) => {
@@ -703,45 +606,39 @@ impl<'a> VirtualMachine<'a> {
 
                 Instruction::GetLocal(pos) => {
                     let val = stack[frame.slot_start + pos];
-                    stack[self.stack_top] = val;
-                    self.stack_top += 1;
+                    self.push(val);
                 }
 
                 Instruction::SetGlobal(pos) => {
-                    if let Value::Object(key) = chunk.values[*pos] {
-                        let val = stack[self.stack_top - 1];
-                        let heap = self.heap.as_mut().unwrap();
-                        match heap.globals.get_mut(&key) {
-                            Some(slot) => *slot = val,
-                            None => {
-                                return Err(InterpretError::UndefinedVariable {
-                                    identifier: self.key_to_string(key),
-                                });
-                            }
+                    let key = get_obj_key(&chunk.values[*pos]);
+                    let val = stack[self.stack_top - 1];
+                    match self.heap.as_mut().unwrap().globals.get_mut(&key) {
+                        Some(slot) => *slot = val,
+                        None => {
+                            return Err(InterpretError::UndefinedVariable {
+                                identifier: self.key_to_string(key),
+                            });
                         }
                     }
                 }
 
                 Instruction::DefineGlobal(pos) => {
-                    if let Value::Object(key) = chunk.values[*pos] {
-                        self.stack_top -= 1;
-                        let val = stack[self.stack_top];
-                        self.heap.as_mut().unwrap().globals.insert(key, val);
-                    }
+                    let key = get_obj_key(&chunk.values[*pos]);
+                    self.stack_top -= 1;
+                    let val = stack[self.stack_top];
+                    self.heap.as_mut().unwrap().globals.insert(key, val);
                 }
 
                 Instruction::GetGlobal(pos) => {
-                    if let Value::Object(key) = chunk.values[*pos] {
-                        match self.heap.as_ref().unwrap().globals.get(&key) {
-                            Some(&val) => {
-                                stack[self.stack_top] = val;
-                                self.stack_top += 1;
-                            }
-                            None => {
-                                return Err(InterpretError::UndefinedVariable {
-                                    identifier: self.key_to_string(key),
-                                });
-                            }
+                    let key = get_obj_key(&chunk.values[*pos]);
+                    match self.heap.as_ref().unwrap().globals.get(&key) {
+                        Some(&val) => {
+                            self.push(val);
+                        }
+                        None => {
+                            return Err(InterpretError::UndefinedVariable {
+                                identifier: self.key_to_string(key),
+                            });
                         }
                     }
                 }
@@ -752,23 +649,19 @@ impl<'a> VirtualMachine<'a> {
 
                 Instruction::Constant(pos) => {
                     let val = chunk.values[*pos];
-                    stack[self.stack_top] = val;
-                    self.stack_top += 1;
+                    self.push(val);
                 }
 
                 Instruction::True => {
-                    stack[self.stack_top] = Value::Boolean(true);
-                    self.stack_top += 1;
+                    self.push(Value::Boolean(true));
                 }
 
                 Instruction::False => {
-                    stack[self.stack_top] = Value::Boolean(false);
-                    self.stack_top += 1;
+                    self.push(Value::Boolean(false));
                 }
 
                 Instruction::Nil => {
-                    stack[self.stack_top] = Value::Nil;
-                    self.stack_top += 1;
+                    self.push(Value::Nil);
                 }
 
                 Instruction::Not => {
@@ -822,8 +715,7 @@ impl<'a> VirtualMachine<'a> {
                     let slot_start = frame.slot_start;
                     self.close_upvalues(slot_start);
                     self.stack_top = slot_start;
-                    self.stack[self.stack_top] = result;
-                    self.stack_top += 1;
+                    self.push(result);
                 }
             }
         }
@@ -899,8 +791,7 @@ impl<'a> VirtualMachine<'a> {
             Instruction::Add => match (a, b) {
                 (Value::Number(n1), Value::Number(n2)) => Value::Number(n1 + n2),
                 (Value::Object(k1), Value::Object(k2)) => {
-                    let heap = self.heap.as_mut().unwrap();
-                    Value::Object(heap.concatenate_strings(k1, k2))
+                    Value::Object(self.heap.as_mut().unwrap().concatenate_strings(k1, k2))
                 }
                 _ => {
                     return Err(InterpretError::TypeError {
@@ -974,26 +865,18 @@ impl<'a> VirtualMachine<'a> {
         let heap = self.heap.as_ref().unwrap();
         for i in (0..self.frame_count).rev() {
             let frame = unsafe { self.frames[i].assume_init_ref() };
-            let function_key =
-                if let Object::Closure(closure) = heap.arena.get(frame.closure).unwrap() {
-                    closure.function
-                } else {
-                    unreachable!()
-                };
+            let function_key = heap.get_closure(frame.closure).function;
 
-            let object = heap.arena.get(function_key).unwrap();
-            if let Object::Function(function) = object {
-                let instruction = frame.ip.saturating_sub(1);
-                let line = function.chunk.get_line(instruction);
+            let function = heap.get_function(function_key);
 
-                if let Some(name_key) = function.name {
-                    let name_obj = heap.arena.get(name_key).unwrap();
-                    if let Object::String(value) = name_obj {
-                        eprintln!("[line {}] in {}()", line, value);
-                    }
-                } else {
-                    eprintln!("[line {}] in script", line);
-                }
+            let instruction = frame.ip.saturating_sub(1);
+            let line = function.chunk.get_line(instruction);
+
+            if let Some(name_key) = function.name {
+                let value = heap.get_string(name_key);
+                eprintln!("[line {}] in {}()", line, value);
+            } else {
+                eprintln!("[line {}] in script", line);
             }
         }
     }

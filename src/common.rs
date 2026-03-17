@@ -8,19 +8,21 @@ pub enum Value {
     Object(HeapKey),
 }
 
+#[inline(always)]
+pub fn get_obj_key(value: &Value) -> HeapKey {
+    let Value::Object(obj_key) = value else {
+        unreachable!("should have been a Object Value here!")
+    };
+    *obj_key
+}
+
 impl Value {
     fn print_function(&self, function: &ObjFunction, heap: &Heap) -> String {
         let fn_name = if let Some(fn_name_key) = function.name {
-            let object = heap.arena.get(fn_name_key).unwrap();
-            if let Object::String(fn_name) = object {
-                fn_name
-            } else {
-                unreachable!()
-            }
+            heap.get_string(fn_name_key)
         } else {
             "<script>"
         };
-
         format!("fn {}()", fn_name)
     }
     pub fn display(&self, heap: &Heap) -> String {
@@ -35,49 +37,25 @@ impl Value {
                     Object::String(string) => string.to_owned(),
                     Object::Function(function) => self.print_function(function, heap),
                     Object::Closure(closure) => {
-                        if let Object::Function(function) =
-                            heap.arena.get(closure.function).unwrap()
-                        {
-                            self.print_function(function, heap)
-                        } else {
-                            unreachable!() // hopefully :|
-                        }
+                        let function = heap.get_function(closure.function);
+                        self.print_function(function, heap)
                     }
                     Object::NativeFunction(native_function) => {
                         format!("fn {}()", native_function.name)
                     }
                     Object::Instance(instance) => {
-                        let name =
-                            if let Object::Class(class) = heap.arena.get(instance.class).unwrap() {
-                                if let Object::String(name) = heap.arena.get(class.name).unwrap() {
-                                    name
-                                } else {
-                                    unreachable!()
-                                }
-                            } else {
-                                unreachable!();
-                            };
+                        let class = heap.get_class(instance.class);
+                        let name = heap.get_string(class.name);
                         format!("{} instance", name)
                     }
                     Object::Class(obj_class) => {
-                        if let Object::String(class_name) = heap.arena.get(obj_class.name).unwrap()
-                        {
-                            format!("class {} {{}}", class_name)
-                        } else {
-                            unreachable!()
-                        }
+                        let class_name = heap.get_string(obj_class.name);
+                        format!("class {} {{}}", class_name)
                     }
                     Object::BoundMethod(bound_method) => {
-                        if let Object::Closure(closure) =
-                            heap.arena.get(bound_method.method).unwrap()
-                        {
-                            if let Object::Function(function) =
-                                heap.arena.get(closure.function).unwrap()
-                            {
-                                return self.print_function(function, heap);
-                            }
-                        }
-                        unreachable!()
+                        let closure = heap.get_closure(bound_method.method);
+                        let function = heap.get_function(closure.function);
+                        self.print_function(function, heap)
                     }
                 }
             }
