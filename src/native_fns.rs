@@ -11,7 +11,7 @@ type Result = std::result::Result<Value, String>;
 const NATIVES: &[(&str, NativeFn)] = &[
     ("clock", clock),
     ("print", print),
-    ("print_ln", print_ln),
+    ("println", print_ln),
     ("len", len),
     ("type", type_of),
     ("sleep", sleep),
