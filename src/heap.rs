@@ -32,7 +32,7 @@ pub enum Object {
 }
 
 pub struct ObjFunction {
-    pub arity: u64,
+    pub arity: usize,
     pub chunk: Chunk,
     pub name: Option<HeapKey>,
 }

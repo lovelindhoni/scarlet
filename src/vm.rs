@@ -149,7 +149,7 @@ impl<'a> VirtualMachine<'a> {
 
         match object {
             Object::Function(function) => {
-                if function.arity as usize != arg_count {
+                if function.arity != arg_count {
                     return Err(InterpretError::ArgumentsCountMismatch {
                         message: format!(
                             "Expected {} arguments but got {}.",
