@@ -21,15 +21,10 @@ const NATIVES: &[(&str, NativeFn)] = &[
 
 pub fn initialize_native_functions(heap: &mut Heap) {
     for (name, func) in NATIVES {
-        register(heap, name, *func);
+        let name_key = heap.allocate_or_intern_string(name);
+        let fn_key = heap.allocate_native_function(name, *func);
+        heap.globals.insert(name_key, Value::Object(fn_key));
     }
-}
-
-fn register(heap: &mut Heap, name: &'static str, function: NativeFn) {
-    let name_key = heap.allocate_or_intern_string(name);
-    let fn_key = heap.allocate_native_function(name, function);
-
-    heap.globals.insert(name_key, Value::Object(fn_key));
 }
 
 fn clock(fn_name: &'static str, args: &[Value], _heap: &mut Heap) -> Result {

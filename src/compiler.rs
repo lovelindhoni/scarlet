@@ -270,10 +270,9 @@ impl<'a> Parser<'a> {
     }
 
     fn function(&mut self, function_type: FunctionType) -> Result<()> {
-        let function_name = if let FunctionType::Function = function_type {
-            Some(String::from_utf8_lossy(&self.prev_lexeme()?).to_string())
-        } else {
-            None
+        let function_name = match function_type {
+            FunctionType::Script => None,
+            _ => Some(String::from_utf8_lossy(&self.prev_lexeme()?).to_string()),
         };
         let compiler = Compiler::new(self.heap.allocate_function(function_name), function_type);
         self.compilers.push(compiler);
