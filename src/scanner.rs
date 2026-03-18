@@ -116,10 +116,8 @@ impl Scanner {
                     self.advance();
                 }
                 let identifier = match self.source[self.start] {
-                    b'a' => self.check_keyword(1, 2, "nd", TokenType::And),
                     b'c' => self.check_keyword(1, 4, "lass", TokenType::Class),
                     b'n' => self.check_keyword(1, 2, "il", TokenType::Nil),
-                    b'o' => self.check_keyword(1, 1, "r", TokenType::Or),
                     b'r' => self.check_keyword(1, 5, "eturn", TokenType::Return),
                     b'w' => self.check_keyword(1, 4, "hile", TokenType::While),
                     b'e' => self.check_keyword(1, 3, "lse", TokenType::Else),
@@ -193,8 +191,24 @@ impl Scanner {
             b'*' => Ok(self.make_token(TokenType::Star)),
             b'%' => Ok(self.make_token(TokenType::Modulo)),
             b'^' => Ok(self.make_token(TokenType::BitXor)),
-            b'&' => Ok(self.make_token(TokenType::BitAnd)),
-            b'|' => Ok(self.make_token(TokenType::BitOr)),
+
+            b'&' => {
+                let variant = if self.match_next(b'&') {
+                    TokenType::And
+                } else {
+                    TokenType::BitAnd
+                };
+                Ok(self.make_token(variant))
+            }
+
+            b'|' => {
+                let variant = if self.match_next(b'|') {
+                    TokenType::Or
+                } else {
+                    TokenType::BitOr
+                };
+                Ok(self.make_token(variant))
+            }
 
             b'!' => {
                 let variant = if self.match_next(b'=') {
@@ -350,6 +364,8 @@ impl fmt::Display for TokenType {
             TokenType::LessEqual => "<=",
             TokenType::BitShiftLeft => "<<",
             TokenType::BitShiftRight => ">>",
+            TokenType::And => "&&",
+            TokenType::Or => "||",
 
             // Literals
             TokenType::Identifier => "identifier",
@@ -357,7 +373,6 @@ impl fmt::Display for TokenType {
             TokenType::Number => "number",
 
             // Keywords
-            TokenType::And => "and",
             TokenType::Else => "else",
             TokenType::False => "false",
             TokenType::For => "for",
@@ -365,7 +380,6 @@ impl fmt::Display for TokenType {
             TokenType::Class => "class",
             TokenType::If => "if",
             TokenType::Nil => "nil",
-            TokenType::Or => "or",
             TokenType::Return => "return",
             TokenType::Super => "super",
             TokenType::This => "this",
