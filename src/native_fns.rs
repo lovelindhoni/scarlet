@@ -1,13 +1,17 @@
 use crate::{
     common::Value,
     heap::{Heap, NativeFn, Object},
+    log_print, log_println,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 type Result = std::result::Result<Value, String>;
 
+#[cfg(not(target_arch = "wasm32"))]
 const NATIVES: &[(&str, NativeFn)] = &[
     ("clock", clock),
     ("print", print),
@@ -20,6 +24,16 @@ const NATIVES: &[(&str, NativeFn)] = &[
     ("read", read),
 ];
 
+#[cfg(target_arch = "wasm32")]
+const NATIVES: &[(&str, NativeFn)] = &[
+    ("print", print),
+    ("println", print_ln),
+    ("len", len),
+    ("type", type_of),
+    ("to_string", to_string),
+    ("to_number", to_number),
+];
+
 pub fn initialize_native_functions(heap: &mut Heap) {
     for (name, func) in NATIVES {
         let name_key = heap.allocate_or_intern_string(name);
@@ -28,6 +42,7 @@ pub fn initialize_native_functions(heap: &mut Heap) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn clock(fn_name: &'static str, args: &[Value], _heap: &mut Heap) -> Result {
     check_arguments_len(0, args.len(), fn_name)?;
 
@@ -42,23 +57,28 @@ fn clock(fn_name: &'static str, args: &[Value], _heap: &mut Heap) -> Result {
     Ok(time)
 }
 
-fn print_values(args: &[Value], heap: &mut Heap) {
-    for (i, value) in args.iter().enumerate() {
-        if i > 0 {
-            print!(" ");
-        }
-        print!("{}", value.display(heap));
-    }
+fn print_values(args: &[Value], heap: &mut Heap) -> String {
+    args.iter()
+        .enumerate()
+        .map(|(i, value)| {
+            if i > 0 {
+                format!(" {}", value.display(heap))
+            } else {
+                format!("{}", value.display(heap))
+            }
+        })
+        .collect()
 }
 
 fn print(_fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
-    print_values(args, heap);
+    let output = print_values(args, heap);
+    log_print!("{}", output);
     Ok(Value::Nil)
 }
 
 fn print_ln(_fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
-    print_values(args, heap);
-    println!();
+    let output = print_values(args, heap);
+    log_println!("{}", output);
     Ok(Value::Nil)
 }
 
@@ -100,6 +120,7 @@ fn type_of(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     Ok(Value::Object(key))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn sleep(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     check_arguments_len(1, args.len(), fn_name)?;
 
@@ -174,6 +195,7 @@ fn to_number(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     Ok(Value::Number(num))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn read(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     check_arguments_len(1, args.len(), fn_name)?;
 

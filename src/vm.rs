@@ -3,8 +3,7 @@ use std::mem::MaybeUninit;
 use crate::common::{Instruction, Value, get_obj_key, validate_int};
 use crate::error::InterpretError;
 use crate::heap::{BASE_GC_TRIGGER, Heap, HeapKey, Object, UpvalueState, mark_object, mark_value};
-#[cfg(feature = "trace")]
-use crate::trace::diassemble_instruction;
+use crate::log_error;
 
 const GC_HEAP_GROW_FACTOR: u32 = 2;
 const FRAMES_MAX: usize = 64;
@@ -287,21 +286,6 @@ impl<'a> VirtualMachine<'a> {
             let instruction = unsafe { chunk.instructions.get_unchecked(frame.ip) };
 
             frame.ip += 1;
-
-            #[cfg(feature = "trace")]
-            println!("Gutting VM's stack");
-
-            #[cfg(feature = "trace")]
-            if self.stack_top == 0 {
-                println!("Stack is Empty!");
-            } else {
-                for value in &self.stack[..self.stack_top] {
-                    println!("[ {:?} ]", value);
-                }
-            }
-
-            #[cfg(feature = "trace")]
-            diassemble_instruction(chunk, frame.ip);
 
             match instruction {
                 Instruction::SuperInvoke(name_pos, arg_count) => {
@@ -963,9 +947,9 @@ impl<'a> VirtualMachine<'a> {
 
             if let Some(name_key) = function.name {
                 let value = heap.get_string(name_key);
-                eprintln!("[line {}] in {}()", line, value);
+                log_error!("[line {}] in {}()", line, value);
             } else {
-                eprintln!("[line {}] in script", line);
+                log_error!("[line {}] in script", line);
             }
         }
     }

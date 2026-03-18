@@ -4,6 +4,7 @@ mod common;
 mod compiler;
 mod error;
 mod heap;
+mod log;
 mod native_fns;
 mod scanner;
 mod trace;
