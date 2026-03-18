@@ -1,4 +1,7 @@
-use crate::heap::{Heap, HeapKey, ObjFunction, Object, Upvalue};
+use crate::{
+    error::InterpretError,
+    heap::{Heap, HeapKey, ObjFunction, Object, Upvalue},
+};
 
 #[derive(Copy, Clone)]
 pub enum Value {
@@ -63,6 +66,29 @@ impl Value {
     }
 }
 
+pub fn validate_int(val: f64) -> Result<i64, InterpretError> {
+    if !val.is_finite() {
+        return Err(InterpretError::TypeError {
+            message: "Operand must be finite for bitwise operations".to_string(),
+        });
+    }
+
+    if val.fract() != 0.0 {
+        return Err(InterpretError::TypeError {
+            message: "Operands must be numbers with no frational part for bitwise operations"
+                .to_string(),
+        });
+    }
+
+    if val < i64::MIN as f64 || val > i64::MAX as f64 {
+        return Err(InterpretError::TypeError {
+            message: "Number out of range for bitwise operations".to_string(),
+        });
+    }
+
+    Ok(val as i64)
+}
+
 #[derive(Clone)]
 pub enum Instruction {
     Constant(usize),
@@ -85,6 +111,11 @@ pub enum Instruction {
     Invoke(usize, usize),
     GetSuper(usize),
     SuperInvoke(usize, usize),
+    ShiftLeft,
+    ShiftRight,
+    BitXor,
+    BitAnd,
+    BitOr,
     CloseUpvalue,
     Inherit,
     True,
@@ -139,6 +170,12 @@ impl Instruction {
             Instruction::False => "FALSE",
             Instruction::Nil => "NIL",
             Instruction::Return => "RETURN",
+
+            Instruction::BitOr => "BITWISE_OR",
+            Instruction::BitXor => "BITWISE_XOR",
+            Instruction::BitAnd => "BITWISE_AND",
+            Instruction::ShiftLeft => "BITWISE_SHIFTLEFT",
+            Instruction::ShiftRight => "BITWISE_SHIFTRIGHT",
 
             Instruction::Negate => "NEGATE",
             Instruction::Add => "ADD",

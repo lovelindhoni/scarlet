@@ -192,6 +192,9 @@ impl Scanner {
             b'/' => Ok(self.make_token(TokenType::Slash)),
             b'*' => Ok(self.make_token(TokenType::Star)),
             b'%' => Ok(self.make_token(TokenType::Modulo)),
+            b'^' => Ok(self.make_token(TokenType::BitXor)),
+            b'&' => Ok(self.make_token(TokenType::BitAnd)),
+            b'|' => Ok(self.make_token(TokenType::BitOr)),
 
             b'!' => {
                 let variant = if self.match_next(b'=') {
@@ -210,7 +213,9 @@ impl Scanner {
                 Ok(self.make_token(variant))
             }
             b'<' => {
-                let variant = if self.match_next(b'=') {
+                let variant = if self.match_next(b'<') {
+                    TokenType::BitShiftLeft
+                } else if self.match_next(b'=') {
                     TokenType::LessEqual
                 } else {
                     TokenType::Less
@@ -218,7 +223,9 @@ impl Scanner {
                 Ok(self.make_token(variant))
             }
             b'>' => {
-                let variant = if self.match_next(b'=') {
+                let variant = if self.match_next(b'>') {
+                    TokenType::BitShiftRight
+                } else if self.match_next(b'=') {
                     TokenType::GreaterEqual
                 } else {
                     TokenType::Greater
@@ -269,6 +276,9 @@ pub enum TokenType {
     Slash,
     Star,
     Modulo,
+    BitAnd,
+    BitOr,
+    BitXor,
 
     // One or two character tokens.
     Bang,
@@ -279,6 +289,8 @@ pub enum TokenType {
     GreaterEqual,
     Less,
     LessEqual,
+    BitShiftLeft,
+    BitShiftRight,
 
     // Literals.
     Identifier,
@@ -323,6 +335,10 @@ impl fmt::Display for TokenType {
             TokenType::Star => "*",
             TokenType::Modulo => "%",
 
+            TokenType::BitOr => "|",
+            TokenType::BitAnd => "&",
+            TokenType::BitXor => "^",
+
             // One or two character tokens
             TokenType::Bang => "!",
             TokenType::BangEqual => "!=",
@@ -332,6 +348,8 @@ impl fmt::Display for TokenType {
             TokenType::GreaterEqual => ">=",
             TokenType::Less => "<",
             TokenType::LessEqual => "<=",
+            TokenType::BitShiftLeft => "<<",
+            TokenType::BitShiftRight => ">>",
 
             // Literals
             TokenType::Identifier => "identifier",

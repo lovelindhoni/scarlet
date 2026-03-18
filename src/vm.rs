@@ -1,6 +1,6 @@
 use std::mem::MaybeUninit;
 
-use crate::common::{Instruction, Value, get_obj_key};
+use crate::common::{Instruction, Value, get_obj_key, validate_int};
 use crate::error::InterpretError;
 use crate::heap::{BASE_GC_TRIGGER, Heap, HeapKey, Object, UpvalueState, mark_object, mark_value};
 #[cfg(feature = "trace")]
@@ -676,6 +676,26 @@ impl<'a> VirtualMachine<'a> {
                     self.binary_op(Instruction::Greater)?;
                 }
 
+                Instruction::BitAnd => {
+                    self.binary_op(Instruction::BitAnd)?;
+                }
+
+                Instruction::BitXor => {
+                    self.binary_op(Instruction::BitXor)?;
+                }
+
+                Instruction::BitOr => {
+                    self.binary_op(Instruction::BitOr)?;
+                }
+
+                Instruction::ShiftRight => {
+                    self.binary_op(Instruction::ShiftRight)?;
+                }
+
+                Instruction::ShiftLeft => {
+                    self.binary_op(Instruction::ShiftLeft)?;
+                }
+
                 Instruction::Less => {
                     self.binary_op(Instruction::Less)?;
                 }
@@ -773,6 +793,18 @@ impl<'a> VirtualMachine<'a> {
             Instruction::Not => match val {
                 Value::Nil => Value::Boolean(true),
                 Value::Boolean(b) => Value::Boolean(!b),
+                Value::Number(num) => {
+                    if num.fract() != 0.0 {
+                        return Err(InterpretError::TypeError {
+                            message: "Bitwise NOT can't be done with fractional part".to_string(),
+                        });
+                    } else if num < i64::MIN as f64 || num > i64::MAX as f64 {
+                        return Err(InterpretError::TypeError {
+                            message: "Number out of range for Bitwise NOT".to_string(),
+                        });
+                    }
+                    Value::Number(!(num as i64) as f64)
+                }
                 _ => Value::Boolean(false),
             },
             _ => unreachable!("Invalid unary operation"),
@@ -817,6 +849,11 @@ impl<'a> VirtualMachine<'a> {
             Instruction::Greater => self.bool_op(a, b, |x, y| x > y)?,
             Instruction::Less => self.bool_op(a, b, |x, y| x < y)?,
             Instruction::Equal => self.equal_op(a, b)?,
+            Instruction::BitAnd => self.bitwise_op(a, b, |x, y| x & y)?,
+            Instruction::BitOr => self.bitwise_op(a, b, |x, y| x | y)?,
+            Instruction::BitXor => self.bitwise_op(a, b, |x, y| x ^ y)?,
+            Instruction::ShiftLeft => self.bitwise_shift_op(a, b, |x, y| x << y)?,
+            Instruction::ShiftRight => self.bitwise_shift_op(a, b, |x, y| x >> y)?,
             _ => return Err(InterpretError::InvalidBinaryOp),
         };
 
@@ -835,6 +872,26 @@ impl<'a> VirtualMachine<'a> {
                 message: "Operands must be numbers.".to_string(),
             }),
         }
+    }
+
+    #[inline(always)]
+    fn bitwise_op<F>(&mut self, a: Value, b: Value, op: F) -> Result<Value>
+    where
+        F: Fn(i64, i64) -> i64,
+    {
+        let (a, b) = match (a, b) {
+            (Value::Number(a), Value::Number(b)) => (a, b),
+            _ => {
+                return Err(InterpretError::TypeError {
+                    message: "Operands must be numbers for bitwise operations".to_string(),
+                });
+            }
+        };
+
+        let a = validate_int(a)?;
+        let b = validate_int(b)?;
+
+        Ok(Value::Number(op(a, b) as f64))
     }
 
     #[inline(always)]
@@ -859,6 +916,38 @@ impl<'a> VirtualMachine<'a> {
             (Value::Object(k1), Value::Object(k2)) => Value::Boolean(k1 == k2),
             _ => Value::Boolean(false),
         })
+    }
+
+    #[inline(always)]
+    fn bitwise_shift_op<F>(&mut self, a: Value, b: Value, op: F) -> Result<Value>
+    where
+        F: Fn(i64, u32) -> i64,
+    {
+        let (a, b) = match (a, b) {
+            (Value::Number(a), Value::Number(b)) => (a, b),
+            _ => {
+                return Err(InterpretError::TypeError {
+                    message: "Operands must be numbers for shift operation".to_string(),
+                });
+            }
+        };
+
+        let a = validate_int(a)?;
+        let b = validate_int(b)?;
+
+        if b < 0 {
+            return Err(InterpretError::TypeError {
+                message: "Shift amount must be non-negative.".to_string(),
+            });
+        }
+
+        if b >= 64 {
+            return Err(InterpretError::TypeError {
+                message: "Shift amount too large.".to_string(),
+            });
+        }
+
+        Ok(Value::Number(op(a, b as u32) as f64))
     }
 
     fn print_stack_trace(&self) {

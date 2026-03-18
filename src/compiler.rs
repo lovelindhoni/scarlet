@@ -13,8 +13,12 @@ enum Precedence {
     Assignment, // =
     Or,         // or
     And,        // and
+    BitOr,      // |
+    BitXor,     // ^
+    BitAnd,     // &
     Equality,   // == !=
     Comparison, // < > <= >=
+    Shift,      // << >>
     Term,       // + -
     Factor,     // * /
     Unary,      // ! -
@@ -29,9 +33,13 @@ impl Precedence {
             None => Assignment,
             Assignment => Or,
             Or => And,
-            And => Equality,
+            And => BitOr,
+            BitOr => BitXor,
+            BitXor => BitAnd,
+            BitAnd => Equality,
             Equality => Comparison,
-            Comparison => Term,
+            Comparison => Shift,
+            Shift => Term,
             Term => Factor,
             Factor => Unary,
             Unary => Call,
@@ -561,8 +569,12 @@ impl<'a> Parser<'a> {
             TokenType::Minus | TokenType::Plus => Precedence::Term,
             TokenType::Slash | TokenType::Star | TokenType::Modulo => Precedence::Factor,
             TokenType::BangEqual | TokenType::EqualEqual => Precedence::Equality,
+            TokenType::BitAnd => Precedence::BitAnd,
+            TokenType::BitOr => Precedence::BitOr,
+            TokenType::BitXor => Precedence::BitXor,
             TokenType::And => Precedence::And,
             TokenType::Or => Precedence::Or,
+            TokenType::BitShiftLeft | TokenType::BitShiftRight => Precedence::Shift,
             TokenType::LeftParen | TokenType::Dot => Precedence::Call,
             TokenType::Greater
             | TokenType::GreaterEqual
@@ -641,6 +653,11 @@ impl<'a> Parser<'a> {
             | TokenType::Greater
             | TokenType::GreaterEqual
             | TokenType::Less
+            | TokenType::BitOr
+            | TokenType::BitAnd
+            | TokenType::BitXor
+            | TokenType::BitShiftLeft
+            | TokenType::BitShiftRight
             | TokenType::LessEqual => self.binary(),
             TokenType::And => self.and(),
             TokenType::Or => self.or(),
@@ -833,6 +850,11 @@ impl<'a> Parser<'a> {
             TokenType::Slash => self.emit(Instruction::Divide)?,
             TokenType::Modulo => self.emit(Instruction::Modulo)?,
             TokenType::EqualEqual => self.emit(Instruction::Equal)?,
+            TokenType::BitXor => self.emit(Instruction::BitXor)?,
+            TokenType::BitAnd => self.emit(Instruction::BitAnd)?,
+            TokenType::BitOr => self.emit(Instruction::BitOr)?,
+            TokenType::BitShiftLeft => self.emit(Instruction::ShiftLeft)?,
+            TokenType::BitShiftRight => self.emit(Instruction::ShiftRight)?,
             TokenType::BangEqual => {
                 self.emit(Instruction::Equal)?;
                 self.emit(Instruction::Not)?;
