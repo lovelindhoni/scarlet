@@ -64,7 +64,7 @@ fn print_values(args: &[Value], heap: &mut Heap) -> String {
             if i > 0 {
                 format!(" {}", value.display(heap))
             } else {
-                format!("{}", value.display(heap))
+                value.display(heap).to_string()
             }
         })
         .collect()

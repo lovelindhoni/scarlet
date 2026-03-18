@@ -101,10 +101,10 @@ pub fn diassemble(function_key: HeapKey, heap: &Heap) -> Result<()> {
 
     for idx in 0..chunk.instructions.len() {
         diassemble_instruction(chunk, idx, heap)?;
-        if let Instruction::Closure(pos, _) = &chunk.instructions[idx] {
-            if let Value::Object(inner_key) = chunk.values[*pos] {
-                inner_functions.push(inner_key);
-            }
+        if let Instruction::Closure(pos, _) = &chunk.instructions[idx]
+            && let Value::Object(inner_key) = chunk.values[*pos]
+        {
+            inner_functions.push(inner_key);
         }
     }
 

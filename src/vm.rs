@@ -114,10 +114,10 @@ impl<'a> VirtualMachine<'a> {
     fn capture_upvalue(&mut self, stack_idx: usize) -> HeapKey {
         for &uv_key in &self.open_upvalues {
             let upvalue = self.heap.as_ref().unwrap().get_upvalue(uv_key);
-            if let UpvalueState::Open(loc) = upvalue.state {
-                if loc == stack_idx {
-                    return uv_key;
-                }
+            if let UpvalueState::Open(loc) = upvalue.state
+                && loc == stack_idx
+            {
+                return uv_key;
             }
         }
         let key = self.heap.as_mut().unwrap().allocate_upvalue(stack_idx);
@@ -728,14 +728,13 @@ impl<'a> VirtualMachine<'a> {
     fn close_upvalues(&mut self, from_slot: usize) {
         let heap = self.heap.as_mut().unwrap();
         self.open_upvalues.retain(|&key| {
-            if let Object::Upvalue(uv) = heap.arena.get_mut(key).unwrap() {
-                if let UpvalueState::Open(loc) = uv.state {
-                    if loc >= from_slot {
-                        let val = self.stack[loc];
-                        uv.state = UpvalueState::Closed(val);
-                        return false;
-                    }
-                }
+            if let Object::Upvalue(uv) = heap.arena.get_mut(key).unwrap()
+                && let UpvalueState::Open(loc) = uv.state
+                && loc >= from_slot
+            {
+                let val = self.stack[loc];
+                uv.state = UpvalueState::Closed(val);
+                return false;
             }
             true
         });

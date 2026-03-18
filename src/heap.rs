@@ -179,11 +179,7 @@ impl Heap {
     }
 
     pub fn allocate_function(&mut self, name: Option<String>) -> HeapKey {
-        let function_name = if let Some(name) = name {
-            Some(self.allocate_or_intern_string(&name))
-        } else {
-            None
-        };
+        let function_name = name.map(|name| self.allocate_or_intern_string(&name));
         self.bytes_allocated += size_of::<Object>();
         let function = Object::Function(ObjFunction {
             arity: 0,

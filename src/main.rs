@@ -43,11 +43,11 @@ fn main() {
                 process::exit(1);
             }
         };
-        if cli.debug {
-            if let Err(e) = diassemble(function, &heap) {
-                eprintln!("Trace Error: {}", e);
-                process::exit(1);
-            }
+        if cli.debug
+            && let Err(e) = diassemble(function, &heap)
+        {
+            eprintln!("Trace Error: {}", e);
+            process::exit(1);
         }
         let mut vm = VirtualMachine::new();
         if let Err(e) = vm.interpret(function, &mut heap) {
@@ -91,11 +91,9 @@ fn run_repl(heap: &mut Heap, debug_mode: bool) {
                         continue;
                     }
                 };
-                if debug_mode {
-                    if let Err(e) = diassemble(function, heap) {
-                        eprintln!("Trace Error: {e}");
-                        continue;
-                    }
+                if debug_mode && let Err(e) = diassemble(function, heap) {
+                    eprintln!("Trace Error: {e}");
+                    continue;
                 }
                 if let Err(e) = VirtualMachine::new().interpret(function, heap) {
                     eprintln!("Runtime Error: {e}");
