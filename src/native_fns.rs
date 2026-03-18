@@ -17,6 +17,7 @@ const NATIVES: &[(&str, NativeFn)] = &[
     ("sleep", sleep),
     ("to_string", to_string),
     ("to_number", to_number),
+    ("read", read),
 ];
 
 pub fn initialize_native_functions(heap: &mut Heap) {
@@ -171,6 +172,27 @@ fn to_number(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
     };
 
     Ok(Value::Number(num))
+}
+
+fn read(fn_name: &'static str, args: &[Value], heap: &mut Heap) -> Result {
+    check_arguments_len(1, args.len(), fn_name)?;
+
+    if let Value::Object(key) = args[0] {
+        let prompt = heap.get_string(key);
+        print!("{}", prompt);
+        std::io::Write::flush(&mut std::io::stdout()).ok();
+
+        let mut line = String::new();
+        std::io::stdin()
+            .read_line(&mut line)
+            .map_err(|e| format!("{}() failed to read input: {}", fn_name, e))?;
+
+        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+        let key = heap.allocate_or_intern_string(trimmed);
+        return Ok(Value::Object(key));
+    }
+
+    Err(format!("{}() takes a string argument as prompt", fn_name))
 }
 
 fn check_arguments_len(

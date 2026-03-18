@@ -9,7 +9,7 @@ mod scanner;
 mod trace;
 mod vm;
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::process;
 
 use crate::cli::ScarletCli;
@@ -66,17 +66,19 @@ fn run_repl(heap: &mut Heap, debug_mode: bool) {
         env!("CARGO_PKG_VERSION")
     );
 
-    let stdin = std::io::stdin();
-    let mut lines = stdin.lock().lines();
-
     loop {
         print!(">> ");
         if let Err(e) = io::stdout().flush() {
             eprintln!("IO Error: {e}");
             break;
         }
-        match lines.next() {
-            Some(Ok(line)) => {
+        let mut line = String::new();
+        match std::io::stdin().read_line(&mut line) {
+            Ok(0) => {
+                println!("Byie!");
+                break;
+            }
+            Ok(_) => {
                 let source = line.trim().to_owned().into_bytes();
                 if source.is_empty() {
                     continue;
@@ -98,11 +100,7 @@ fn run_repl(heap: &mut Heap, debug_mode: bool) {
                     eprintln!("Runtime Error: {e}");
                 }
             }
-            None => {
-                println!("Byie!");
-                break;
-            }
-            Some(Err(e)) => {
+            Err(e) => {
                 eprintln!("Input error: {e}");
                 break;
             }
