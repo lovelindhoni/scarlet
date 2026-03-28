@@ -790,7 +790,7 @@ impl<'a> Parser<'a> {
         } else {
             let (_, identifier_name) = self.identifier_constant(token.lexeme.clone());
             if !self.globals_map.contains_key(&identifier_name) {
-                return Err(CompileError::UndefinedVariable { token: token });
+                return Err(CompileError::UndefinedVariable { token });
             }
             if can_assign && self.match_token(TokenType::Equal)? {
                 self.expression()?;
