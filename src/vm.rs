@@ -594,37 +594,21 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 Instruction::SetGlobal(pos) => {
-                    let key = get_obj_key(&chunk.values[*pos]);
                     let val = stack[self.stack_top - 1];
-                    match self.heap.as_mut().unwrap().globals.get_mut(&key) {
-                        Some(slot) => *slot = val,
-                        None => {
-                            return Err(InterpretError::UndefinedVariable {
-                                identifier: self.key_to_string(key),
-                            });
-                        }
-                    }
+                    let pos = *pos;
+                    self.heap.as_mut().unwrap().globals.values[pos] = val;
                 }
 
                 Instruction::DefineGlobal(pos) => {
-                    let key = get_obj_key(&chunk.values[*pos]);
                     self.stack_top -= 1;
                     let val = stack[self.stack_top];
-                    self.heap.as_mut().unwrap().globals.insert(key, val);
+                    let pos = *pos;
+                    self.heap.as_mut().unwrap().globals.values[pos] = val;
                 }
 
                 Instruction::GetGlobal(pos) => {
-                    let key = get_obj_key(&chunk.values[*pos]);
-                    match self.heap.as_ref().unwrap().globals.get(&key) {
-                        Some(&val) => {
-                            self.push(val);
-                        }
-                        None => {
-                            return Err(InterpretError::UndefinedVariable {
-                                identifier: self.key_to_string(key),
-                            });
-                        }
-                    }
+                    let value = self.heap.as_ref().unwrap().globals.values[*pos];
+                    self.push(value);
                 }
 
                 Instruction::Pop => {

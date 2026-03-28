@@ -1,6 +1,8 @@
+use rapidhash::RapidHashMap;
+
 use crate::{
     common::Value,
-    heap::{Heap, NativeFn, Object},
+    heap::{Heap, HeapKey, NativeFn, Object},
     log_print, log_println,
 };
 
@@ -34,11 +36,16 @@ const NATIVES: &[(&str, NativeFn)] = &[
     ("to_number", to_number),
 ];
 
-pub fn initialize_native_functions(heap: &mut Heap) {
+pub fn initialize_native_functions(
+    heap: &mut Heap,
+    globals_map: &mut RapidHashMap<HeapKey, usize>,
+) {
     for (name, func) in NATIVES {
         let name_key = heap.allocate_or_intern_string(name);
         let fn_key = heap.allocate_native_function(name, *func);
-        heap.globals.insert(name_key, Value::Object(fn_key));
+        globals_map.insert(name_key, globals_map.len());
+        heap.globals.identifiers.push(name_key);
+        heap.globals.values.push(Value::Object(fn_key));
     }
 }
 

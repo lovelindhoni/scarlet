@@ -13,9 +13,11 @@ mod vm;
 use std::io::{self, Write};
 use std::process;
 
+use rapidhash::RapidHashMap;
+
 use crate::cli::ScarletCli;
 use crate::compiler::compile;
-use crate::heap::Heap;
+use crate::heap::{Heap, HeapKey};
 use crate::native_fns::initialize_native_functions;
 use crate::trace::diassemble;
 use crate::vm::VirtualMachine;
@@ -24,10 +26,11 @@ fn main() {
     let cli: ScarletCli = argh::from_env();
 
     let mut heap = Heap::new();
-    initialize_native_functions(&mut heap);
+    let mut globals_map = RapidHashMap::default();
+    initialize_native_functions(&mut heap, &mut globals_map);
 
     if cli.repl {
-        run_repl(&mut heap, cli.debug);
+        run_repl(&mut heap, &mut globals_map, cli.debug);
     } else if let Some(script_path) = cli.run {
         let source = match std::fs::read(script_path) {
             Ok(source) => source,
@@ -36,7 +39,7 @@ fn main() {
                 process::exit(1);
             }
         };
-        let function = match compile(source, &mut heap) {
+        let function = match compile(source, &mut globals_map, &mut heap) {
             Ok(function) => function,
             Err(e) => {
                 eprintln!("Compile Error: {}", e);
@@ -57,11 +60,11 @@ fn main() {
     } else if cli.version {
         println!("Scarlet {}", env!("CARGO_PKG_VERSION"));
     } else {
-        run_repl(&mut heap, cli.debug);
+        run_repl(&mut heap, &mut globals_map, cli.debug);
     }
 }
 
-fn run_repl(heap: &mut Heap, debug_mode: bool) {
+fn run_repl(heap: &mut Heap, globals_map: &mut RapidHashMap<HeapKey, usize>, debug_mode: bool) {
     println!(
         "Scarlet {} — REPL (Ctrl-D to exit)",
         env!("CARGO_PKG_VERSION")
@@ -84,7 +87,7 @@ fn run_repl(heap: &mut Heap, debug_mode: bool) {
                 if source.is_empty() {
                     continue;
                 }
-                let function = match compile(source, heap) {
+                let function = match compile(source, globals_map, heap) {
                     Ok(f) => f,
                     Err(e) => {
                         eprintln!("Compile Error: {e}");

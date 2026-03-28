@@ -157,11 +157,18 @@ pub fn mark_object(
     }
 }
 
+#[derive(Default)]
+pub struct Globals {
+    // SOA format, since global identifiers will only be used during diassembly
+    pub values: Vec<Value>,
+    pub identifiers: Vec<HeapKey>,
+}
+
 pub struct Heap {
     pub arena: SlotMap<HeapKey, Object>,
     pub marked_objects: SecondaryMap<HeapKey, bool>, // marks the reachable objects
     pub intern_table: RapidHashMap<String, HeapKey>,
-    pub globals: RapidHashMap<HeapKey, Value>,
+    pub globals: Globals,
     pub bytes_allocated: usize,
     pub next_gc_run: usize,
 }
@@ -171,7 +178,7 @@ impl Heap {
         Self {
             arena: SlotMap::with_key(),
             intern_table: RapidHashMap::new(),
-            globals: RapidHashMap::new(),
+            globals: Globals::default(),
             marked_objects: SecondaryMap::new(),
             bytes_allocated: 0,
             next_gc_run: BASE_GC_TRIGGER,
@@ -253,8 +260,10 @@ impl Heap {
 // GC related methods
 impl Heap {
     pub fn mark_globals(&mut self) {
-        for (identifier_key, value) in &self.globals {
+        for identifier_key in &self.globals.identifiers {
             mark_object(&self.arena, &mut self.marked_objects, identifier_key);
+        }
+        for value in &self.globals.values {
             mark_value(&self.arena, &mut self.marked_objects, value);
         }
     }

@@ -83,7 +83,10 @@ pub enum CompileError {
     LocalVarInItsOwnInitializer { token: Token },
 
     #[error("{msg}", msg = compile_error_helper("Already variable with this name in this scope", token))]
-    RedefinitionOfLocalVar { token: Token },
+    RedefinitionOfVar { token: Token },
+
+    #[error("{msg}", msg = compile_error_helper("Undefined variable", token))]
+    UndefinedVariable { token: Token },
 
     #[error("{msg}", msg = compile_error_helper(.message, .token))]
     MissingPrefixParser { message: String, token: Token },
@@ -111,9 +114,6 @@ pub enum InterpretError {
 
     #[error("Invalid binary operation")]
     InvalidBinaryOp,
-
-    #[error("Undefined variable '{}'", .identifier)]
-    UndefinedVariable { identifier: String },
 
     #[error("{msg}", msg = .message)]
     NativeFunctionError { message: String },

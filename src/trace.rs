@@ -57,6 +57,25 @@ fn constant_instruction(
     );
 }
 
+fn global_instruction(
+    idx: usize,
+    chunk: &Chunk,
+    pos: &usize,
+    instruction: &Instruction,
+    heap: &Heap,
+) {
+    let line = print_prefix(idx, chunk);
+    let identifier_name_key = heap.globals.identifiers[*pos];
+    println!(
+        "{:04} {:>4} {:<16} {:4} '{:?}'",
+        idx,
+        line,
+        instruction.opcode(),
+        pos,
+        heap.get_string(identifier_name_key)
+    );
+}
+
 fn jump_instruction(idx: usize, chunk: &Chunk, offset: &usize, instruction: &Instruction) {
     let line = print_prefix(idx, chunk);
     let destination = idx + 1 + *offset;
@@ -133,19 +152,24 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize, heap: &Heap) -> Result<
         Instruction::Call(arg_count) => {
             byte_instruction(idx, chunk, arg_count, instruction);
         }
+
         Instruction::Jump(offset)
         | Instruction::JumpIfFalse(offset)
         | Instruction::Loop(offset) => {
             jump_instruction(idx, chunk, offset, instruction);
         }
+
         Instruction::GetGlobal(pos)
         | Instruction::SetGlobal(pos)
-        | Instruction::Constant(pos)
+        | Instruction::DefineGlobal(pos) => {
+            global_instruction(idx, chunk, pos, instruction, heap);
+        }
+
+        Instruction::Constant(pos)
         | Instruction::Class(pos)
         | Instruction::GetProperty(pos)
         | Instruction::SetProperty(pos)
-        | Instruction::Method(pos)
-        | Instruction::DefineGlobal(pos) => {
+        | Instruction::Method(pos) => {
             constant_instruction(idx, chunk, pos, instruction, heap);
         }
 

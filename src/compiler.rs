@@ -1,3 +1,5 @@
+use rapidhash::RapidHashMap;
+
 use crate::chunk::Chunk;
 use crate::common::{Instruction, Value};
 use crate::error::CompileError;
@@ -49,9 +51,13 @@ impl Precedence {
     }
 }
 
-pub fn compile(source: Vec<u8>, heap: &mut Heap) -> Result<HeapKey> {
+pub fn compile(
+    source: Vec<u8>,
+    globals_map: &mut RapidHashMap<HeapKey, usize>,
+    heap: &mut Heap,
+) -> Result<HeapKey> {
     let compiler = Compiler::new(heap.allocate_function(None), FunctionType::Script);
-    let mut parser = Parser::new(source, compiler, heap);
+    let mut parser = Parser::new(source, compiler, heap, globals_map);
     parser.advance()?;
     while !parser.match_token(TokenType::Eof)? {
         parser.declaration()?;
@@ -123,6 +129,7 @@ struct Parser<'a> {
     current_token: Option<Token>,
     scanner: Scanner,
     compilers: Vec<Compiler>,
+    globals_map: &'a mut RapidHashMap<HeapKey, usize>,
     class_compilers: Vec<ClassCompiler>,
     heap: &'a mut Heap,
 }
@@ -159,13 +166,13 @@ impl<'a> Parser<'a> {
         &mut self.heap.get_mut_function(function).chunk
     }
 
-    fn identifier_constant(&mut self, lexeme: Vec<u8>) -> usize {
+    fn identifier_constant(&mut self, lexeme: Vec<u8>) -> (usize, HeapKey) {
         let identifier = String::from_utf8_lossy(&lexeme).to_string();
         let key = self.heap.allocate_or_intern_string(&identifier);
-        self.current_chunk().add_constant(Value::Object(key))
+        (self.current_chunk().add_constant(Value::Object(key)), key)
     }
 
-    fn identifier_constant_from_prev(&mut self) -> Result<usize> {
+    fn identifier_constant_from_prev(&mut self) -> Result<(usize, HeapKey)> {
         let lexeme = self.prev_lexeme()?;
         Ok(self.identifier_constant(lexeme))
     }
@@ -199,11 +206,11 @@ impl<'a> Parser<'a> {
     fn class_declaration(&mut self) -> Result<()> {
         self.consume(TokenType::Identifier, "Expect class name")?;
         let class_name = self.prev_token()?.to_owned();
-        let name_constant = self.identifier_constant_from_prev()?;
+        let (identifier_idx, identifier_string_key) = self.identifier_constant_from_prev()?;
         self.declare_variable()?;
 
-        self.emit(Instruction::Class(name_constant))?;
-        self.define_variable(name_constant)?;
+        self.emit(Instruction::Class(identifier_idx))?;
+        self.define_variable(Some(identifier_string_key))?;
 
         self.class_compilers.push(ClassCompiler {
             has_super_class: false,
@@ -220,7 +227,7 @@ impl<'a> Parser<'a> {
             }
             self.begin_scope();
             self.add_local(self.synthetic_token("super"));
-            self.define_variable(0)?;
+            self.define_variable(None)?;
             self.named_variable(class_name.clone(), false)?;
             self.emit(Instruction::Inherit)?;
             self.class_compilers.last_mut().unwrap().has_super_class = true;
@@ -247,7 +254,7 @@ impl<'a> Parser<'a> {
 
     fn method(&mut self) -> Result<()> {
         self.consume(TokenType::Identifier, "Expect method name")?;
-        let constant = self.identifier_constant_from_prev()?;
+        let (identifier_idx, _) = self.identifier_constant_from_prev()?;
         let function_type = if str::from_utf8(&self.prev_lexeme()?)
             .map_err(|e| CompileError::InvalidUtf8 { source: e })?
             == "init"
@@ -257,15 +264,26 @@ impl<'a> Parser<'a> {
             FunctionType::Method
         };
         self.function(function_type)?;
-        self.emit(Instruction::Method(constant))?;
+        self.emit(Instruction::Method(identifier_idx))?;
         Ok(())
     }
 
     fn fun_declaration(&mut self) -> Result<()> {
         let function_name = self.parse_variable("Expect function name")?;
         self.mark_intialized()?;
+        let global_idx = if let Some(key) = function_name {
+            let idx = self.globals_map.len();
+            self.globals_map.insert(key, idx);
+            self.heap.globals.identifiers.push(key);
+            self.heap.globals.values.push(Value::Nil);
+            Some(idx)
+        } else {
+            None
+        };
         self.function(FunctionType::Function)?;
-        self.define_variable(function_name)?;
+        if let Some(idx) = global_idx {
+            self.emit(Instruction::DefineGlobal(idx))?;
+        }
         Ok(())
     }
 
@@ -320,13 +338,18 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn parse_variable(&mut self, message: &str) -> Result<usize> {
+    fn parse_variable(&mut self, message: &str) -> Result<Option<HeapKey>> {
         self.consume(TokenType::Identifier, message)?;
         self.declare_variable()?;
         if self.current_compiler().scope_depth > 0 {
-            Ok(0)
+            Ok(None)
         } else {
-            self.identifier_constant_from_prev()
+            let (_, key) = self.identifier_constant_from_prev()?;
+            if self.globals_map.contains_key(&key) {
+                let token = self.prev_token()?.to_owned();
+                return Err(CompileError::RedefinitionOfVar { token });
+            }
+            Ok(Some(key))
         }
     }
 
@@ -345,7 +368,7 @@ impl<'a> Parser<'a> {
                         .current_token
                         .to_owned()
                         .ok_or(CompileError::MissingPreviousToken)?;
-                    return Err(CompileError::RedefinitionOfLocalVar { token: current });
+                    return Err(CompileError::RedefinitionOfVar { token: current });
                 }
             }
             self.add_local(token);
@@ -365,9 +388,15 @@ impl<'a> Parser<'a> {
             .push(Local::new(token, -1));
     }
 
-    fn define_variable(&mut self, global: usize) -> Result<()> {
+    fn define_variable(&mut self, identifier_string: Option<HeapKey>) -> Result<()> {
         if self.current_compiler().scope_depth == 0 {
-            self.emit(Instruction::DefineGlobal(global))?;
+            if let Some(identifier_string) = identifier_string {
+                let idx = self.globals_map.len();
+                self.heap.globals.identifiers.push(identifier_string);
+                self.heap.globals.values.push(Value::Nil);
+                self.globals_map.insert(identifier_string, idx);
+                self.emit(Instruction::DefineGlobal(idx))?;
+            }
         } else {
             self.mark_intialized()?;
         }
@@ -626,16 +655,16 @@ impl<'a> Parser<'a> {
 
         self.consume(TokenType::Dot, "Expect '.' after 'super'")?;
         self.consume(TokenType::Identifier, "Expect superclass method name.")?;
-        let name = self.identifier_constant_from_prev()?;
+        let (identifier_idx, _) = self.identifier_constant_from_prev()?;
 
         self.named_variable(self.synthetic_token("this"), false)?;
         if self.match_token(TokenType::LeftParen)? {
             let arg_count = self.argument_list()?;
             self.named_variable(self.synthetic_token("super"), false)?;
-            self.emit(Instruction::SuperInvoke(name, arg_count))?;
+            self.emit(Instruction::SuperInvoke(identifier_idx, arg_count))?;
         } else {
             self.named_variable(self.synthetic_token("super"), false)?;
-            self.emit(Instruction::GetSuper(name))?;
+            self.emit(Instruction::GetSuper(identifier_idx))?;
         }
         Ok(())
     }
@@ -671,15 +700,16 @@ impl<'a> Parser<'a> {
             TokenType::Identifier,
             "Expect property name after '.' in an instance",
         )?;
-        let name = self.identifier_constant_from_prev()?;
+
+        let (identifier_idx, _) = self.identifier_constant_from_prev()?;
         if can_assign && self.match_token(TokenType::Equal)? {
             self.expression()?;
-            self.emit(Instruction::SetProperty(name))?;
+            self.emit(Instruction::SetProperty(identifier_idx))?;
         } else if self.match_token(TokenType::LeftParen)? {
             let arg_count = self.argument_list()?;
-            self.emit(Instruction::Invoke(name, arg_count))?;
+            self.emit(Instruction::Invoke(identifier_idx, arg_count))?;
         } else {
-            self.emit(Instruction::GetProperty(name))?;
+            self.emit(Instruction::GetProperty(identifier_idx))?;
         }
         Ok(())
     }
@@ -758,12 +788,17 @@ impl<'a> Parser<'a> {
                     .write_instruction(Instruction::GetUpvalue(idx), line);
             }
         } else {
-            let idx = self.identifier_constant(token.lexeme);
+            let (_, identifier_name) = self.identifier_constant(token.lexeme.clone());
+            if !self.globals_map.contains_key(&identifier_name) {
+                return Err(CompileError::UndefinedVariable { token: token });
+            }
             if can_assign && self.match_token(TokenType::Equal)? {
                 self.expression()?;
+                let idx = self.globals_map[&identifier_name];
                 self.current_chunk()
                     .write_instruction(Instruction::SetGlobal(idx), line);
             } else {
+                let idx = self.globals_map[&identifier_name];
                 self.current_chunk()
                     .write_instruction(Instruction::GetGlobal(idx), line);
             }
@@ -947,7 +982,12 @@ impl<'a> Parser<'a> {
         self.emit(Instruction::Return)
     }
 
-    pub fn new(source: Vec<u8>, compiler: Compiler, heap: &'a mut Heap) -> Self {
+    pub fn new(
+        source: Vec<u8>,
+        compiler: Compiler,
+        heap: &'a mut Heap,
+        globals_map: &'a mut RapidHashMap<HeapKey, usize>,
+    ) -> Self {
         let scanner = Scanner::new(source);
         let compilers = vec![compiler];
         Self {
@@ -956,6 +996,7 @@ impl<'a> Parser<'a> {
             scanner,
             heap,
             compilers,
+            globals_map,
             class_compilers: Vec::new(),
         }
     }
