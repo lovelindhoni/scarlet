@@ -149,7 +149,7 @@ pub fn diassemble_instruction(chunk: &Chunk, idx: usize, heap: &Heap) -> Result<
         | Instruction::GetUpvalue(pos) => {
             byte_instruction(idx, chunk, pos, instruction);
         }
-        Instruction::Call(arg_count) => {
+        Instruction::Call(arg_count) | Instruction::Classify(arg_count) => {
             byte_instruction(idx, chunk, arg_count, instruction);
         }
 

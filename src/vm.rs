@@ -696,23 +696,22 @@ impl<'a> VirtualMachine<'a> {
                 }
 
                 #[cfg(not(target_arch = "wasm32"))]
-                Instruction::Prompt => {
+                Instruction::Generate => {
                     let val = self.pop();
                     let prompt_str = {
                         let heap = self.heap.as_ref().unwrap();
                         let key = get_obj_key(&val);
                         heap.get_string(key).to_owned()
                     };
-                    let response = ai::ai_prompt(&prompt_str)?;
+                    let response = ai::ai_generate(&prompt_str)?;
                     let key = self.heap.as_mut().unwrap().allocate_or_intern_string(&response);
                     self.push(Value::Object(key));
                 }
 
                 #[cfg(target_arch = "wasm32")]
-                Instruction::Prompt => {
+                Instruction::Generate => {
                     return Err(InterpretError::AiError {
-                        message: "AI primitives (prompt/verify) are not supported on WASM"
-                            .to_string(),
+                        message: "AI primitives are not supported on WASM".to_string(),
                     });
                 }
 
@@ -731,8 +730,64 @@ impl<'a> VirtualMachine<'a> {
                 #[cfg(target_arch = "wasm32")]
                 Instruction::Verify => {
                     return Err(InterpretError::AiError {
-                        message: "AI primitives (prompt/verify) are not supported on WASM"
-                            .to_string(),
+                        message: "AI primitives are not supported on WASM".to_string(),
+                    });
+                }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                Instruction::Classify(label_count) => {
+                    let label_count = *label_count;
+                    // pop labels (in reverse order from stack)
+                    let mut labels = Vec::with_capacity(label_count);
+                    for _ in 0..label_count {
+                        let val = self.pop();
+                        let heap = self.heap.as_ref().unwrap();
+                        let key = get_obj_key(&val);
+                        labels.push(heap.get_string(key).to_owned());
+                    }
+                    labels.reverse();
+                    // pop the expression to classify
+                    let val = self.pop();
+                    let text = {
+                        let heap = self.heap.as_ref().unwrap();
+                        let key = get_obj_key(&val);
+                        heap.get_string(key).to_owned()
+                    };
+                    let result = ai::ai_classify(&text, &labels)?;
+                    let key = self.heap.as_mut().unwrap().allocate_or_intern_string(&result);
+                    self.push(Value::Object(key));
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                Instruction::Classify(_) => {
+                    return Err(InterpretError::AiError {
+                        message: "AI primitives are not supported on WASM".to_string(),
+                    });
+                }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                Instruction::Extract => {
+                    // stack: [query, source] — source is on top
+                    let source_val = self.pop();
+                    let query_val = self.pop();
+                    let (query, source) = {
+                        let heap = self.heap.as_ref().unwrap();
+                        let q_key = get_obj_key(&query_val);
+                        let s_key = get_obj_key(&source_val);
+                        (
+                            heap.get_string(q_key).to_owned(),
+                            heap.get_string(s_key).to_owned(),
+                        )
+                    };
+                    let result = ai::ai_extract(&query, &source)?;
+                    let key = self.heap.as_mut().unwrap().allocate_or_intern_string(&result);
+                    self.push(Value::Object(key));
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                Instruction::Extract => {
+                    return Err(InterpretError::AiError {
+                        message: "AI primitives are not supported on WASM".to_string(),
                     });
                 }
 

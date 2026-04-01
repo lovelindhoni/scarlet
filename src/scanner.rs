@@ -116,13 +116,32 @@ impl Scanner {
                     self.advance();
                 }
                 let identifier = match self.source[self.start] {
-                    b'c' => self.check_keyword(1, 4, "lass", TokenType::Class),
+                    b'a' => self.check_keyword(1, 1, "s", TokenType::As),
+                    b'c' => {
+                        // "class" and "classify" both start with "cl"
+                        let kw = self.check_keyword(1, 4, "lass", TokenType::Class);
+                        if kw != TokenType::Identifier {
+                            kw
+                        } else {
+                            self.check_keyword(1, 7, "lassify", TokenType::Classify)
+                        }
+                    }
+                    b'g' => self.check_keyword(1, 7, "enerate", TokenType::Generate),
                     b'n' => self.check_keyword(1, 2, "il", TokenType::Nil),
-                    b'p' => self.check_keyword(1, 5, "rompt", TokenType::Prompt),
                     b'r' => self.check_keyword(1, 5, "eturn", TokenType::Return),
                     b'v' => self.check_keyword(1, 5, "erify", TokenType::Verify),
                     b'w' => self.check_keyword(1, 4, "hile", TokenType::While),
-                    b'e' => self.check_keyword(1, 3, "lse", TokenType::Else),
+                    b'e' => {
+                        if self.current - self.start > 1 {
+                            match self.source[self.start + 1] {
+                                b'l' => self.check_keyword(2, 2, "se", TokenType::Else),
+                                b'x' => self.check_keyword(2, 5, "tract", TokenType::Extract),
+                                _ => TokenType::Identifier,
+                            }
+                        } else {
+                            TokenType::Identifier
+                        }
+                    }
                     b's' => self.check_keyword(1, 4, "uper", TokenType::Super),
                     b'l' => self.check_keyword(1, 2, "et", TokenType::Let),
                     b'i' => {
@@ -141,6 +160,7 @@ impl Scanner {
                             match self.source[self.start + 1] {
                                 b'a' => self.check_keyword(2, 3, "lse", TokenType::False),
                                 b'o' => self.check_keyword(2, 1, "r", TokenType::For),
+                                b'r' => self.check_keyword(2, 2, "om", TokenType::From),
                                 b'u' => self.check_keyword(2, 1, "n", TokenType::Fun),
                                 _ => TokenType::Identifier,
                             }
@@ -315,14 +335,18 @@ pub enum TokenType {
 
     // Keywords.
     And,
+    As,
+    Classify,
     Else,
+    Extract,
     False,
     For,
+    From,
     Fun,
+    Generate,
     If,
     Nil,
     Or,
-    Prompt,
     Return,
     Super,
     Class,
@@ -377,17 +401,21 @@ impl fmt::Display for TokenType {
             TokenType::Number => "number",
 
             // Keywords
+            TokenType::As => "as",
+            TokenType::Classify => "classify",
             TokenType::Else => "else",
+            TokenType::Extract => "extract",
             TokenType::False => "false",
             TokenType::For => "for",
+            TokenType::From => "from",
             TokenType::Fun => "fun",
+            TokenType::Generate => "generate",
             TokenType::Class => "class",
             TokenType::If => "if",
             TokenType::Nil => "nil",
             TokenType::Return => "return",
             TokenType::Super => "super",
             TokenType::This => "this",
-            TokenType::Prompt => "prompt",
             TokenType::True => "true",
             TokenType::Let => "let",
             TokenType::Verify => "verify",

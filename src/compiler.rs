@@ -620,8 +620,10 @@ impl<'a> Parser<'a> {
             TokenType::Identifier => self.variable(can_assign),
             TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::True | TokenType::False | TokenType::Nil => self.literal(),
-            TokenType::Prompt => self.prompt_expr(),
+            TokenType::Generate => self.generate_expr(),
             TokenType::Verify => self.verify_expr(),
+            TokenType::Classify => self.classify_expr(),
+            TokenType::Extract => self.extract_expr(),
             TokenType::Super => self._super(),
             TokenType::This => self.this(),
             _ => Err(CompileError::MissingPrefixParser {
@@ -965,14 +967,41 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn prompt_expr(&mut self) -> Result<()> {
+    fn generate_expr(&mut self) -> Result<()> {
         self.parse_precedence(Precedence::Unary)?;
-        self.emit(Instruction::Prompt)
+        self.emit(Instruction::Generate)
     }
 
     fn verify_expr(&mut self) -> Result<()> {
         self.parse_precedence(Precedence::Unary)?;
         self.emit(Instruction::Verify)
+    }
+
+    // classify <expr> as <label>, <label>, ...
+    fn classify_expr(&mut self) -> Result<()> {
+        // parse the expression to classify
+        self.parse_precedence(Precedence::Unary)?;
+        self.consume(TokenType::As, "Expect 'as' after expression in classify")?;
+        // parse comma-separated labels
+        let mut label_count = 0;
+        loop {
+            self.parse_precedence(Precedence::Unary)?;
+            label_count += 1;
+            if !self.match_token(TokenType::Comma)? {
+                break;
+            }
+        }
+        self.emit(Instruction::Classify(label_count))
+    }
+
+    // extract <expr> from <expr>
+    fn extract_expr(&mut self) -> Result<()> {
+        // parse what to extract
+        self.parse_precedence(Precedence::Unary)?;
+        self.consume(TokenType::From, "Expect 'from' after expression in extract")?;
+        // parse the source text
+        self.parse_precedence(Precedence::Unary)?;
+        self.emit(Instruction::Extract)
     }
 
     fn expression(&mut self) -> Result<()> {

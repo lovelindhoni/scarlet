@@ -132,8 +132,10 @@ pub enum Instruction {
     Equal,
     Greater,
     Less,
-    Prompt,
+    Generate,
     Verify,
+    Classify(usize),
+    Extract,
     Pop,
 }
 
@@ -191,8 +193,10 @@ impl Instruction {
             Instruction::Greater => "GREATER",
             Instruction::Less => "LESS",
 
-            Instruction::Prompt => "PROMPT",
+            Instruction::Generate => "GENERATE",
             Instruction::Verify => "VERIFY",
+            Instruction::Classify(_) => "CLASSIFY",
+            Instruction::Extract => "EXTRACT",
 
             Instruction::Pop => "POP",
 
