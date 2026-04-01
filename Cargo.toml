@@ -22,7 +22,6 @@ path = "src/main.rs"
 
 [dependencies]
 rapidhash = "4.4.1"
-rig-core = "0.34.0"
 slotmap = "1.1.1"
 thiserror = "2.0.18"
 

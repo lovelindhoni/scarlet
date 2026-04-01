@@ -2,7 +2,7 @@ use std::env;
 
 use crate::error::InterpretError;
 
-const GEMINI_MODEL: &str = "gemini-2.0-flash";
+const GEMINI_MODEL: &str = "gemini-3.1-flash-lite-preview";
 
 fn get_api_key() -> Result<String, InterpretError> {
     env::var("GEMINI_API_KEY").map_err(|_| InterpretError::AiMissingApiKey {
@@ -11,10 +11,7 @@ fn get_api_key() -> Result<String, InterpretError> {
     })
 }
 
-fn call_gemini(
-    prompt: &str,
-    system_instruction: Option<&str>,
-) -> Result<String, InterpretError> {
+fn call_gemini(prompt: &str, system_instruction: Option<&str>) -> Result<String, InterpretError> {
     let api_key = get_api_key()?;
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -43,14 +40,15 @@ fn call_gemini(
             });
         }
 
-        let response = client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| InterpretError::AiError {
-                message: format!("AI API request failed: {}", e),
-            })?;
+        let response =
+            client
+                .post(&url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| InterpretError::AiError {
+                    message: format!("AI API request failed: {}", e),
+                })?;
 
         let json: serde_json::Value =
             response.json().await.map_err(|e| InterpretError::AiError {
@@ -67,13 +65,20 @@ fn call_gemini(
 }
 
 pub fn ai_prompt(prompt: &str) -> Result<String, InterpretError> {
-    call_gemini(prompt, None)
+    call_gemini(
+        prompt,
+        Some(
+            "You should never use markdown or any rich formatting text like bolds or italics in your text response",
+        ),
+    )
 }
 
 pub fn ai_verify(prompt: &str) -> Result<bool, InterpretError> {
     let response = call_gemini(
         prompt,
-        Some("You are a verification engine. Respond with ONLY the word 'true' or 'false'. Nothing else."),
+        Some(
+            "You are a verification engine. Respond with ONLY the word 'true' or 'false'. Nothing else.",
+        ),
     )?;
     Ok(response.to_lowercase() == "true")
 }
