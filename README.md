@@ -1,21 +1,122 @@
 # Scarlet
 
-Scarlet is a dynamically typed, object-oriented, garbage-collected programming language written in Rust. It compiles source code to bytecode in a single pass and executes it on a stack-based virtual machine, with the entire runtime weighing in at just ~500 KB. Scarlet runs natively as a CLI tool and also compiles to WebAssembly for embedded use in browsers and Node.js environments.
+Scarlet is an **AI-first**, dynamically typed, object-oriented, garbage-collected scripting language written in Rust. It brings LLM reasoning directly into the language as first-class primitives — no libraries, no API wrappers, just native keywords. Write scripts that think, classify, verify, and extract using natural language, right alongside your regular logic.
+
+Scarlet compiles source code to bytecode in a single pass and executes it on a stack-based virtual machine. The entire runtime weighs ~500 KB. It runs natively as a CLI tool and compiles to WebAssembly for browser and Node.js environments.
 
 ---
 
-## Features
+## AI Primitives
 
-- **Dynamic typing**: variables hold any value type at runtime
-- **Object-oriented**: classes, single inheritance, `this`, `super`, and constructors via `init`
-- **Closures**: first-class functions that capture variables from enclosing scopes via upvalues
-- **Garbage collection**: tri-color mark-and-sweep GC
-- **String interning**: identical strings share a single allocation, enabling O(1) equality checks
-- **Bitwise operators**: `&`, `|`, `^`, `!` (bitwise NOT), `<<`, `>>`
-- **REPL**: interactive read-eval-print loop with persistent state across lines
-- **Debug/disassembly mode**: prints annotated bytecode before execution
-- **Native functions**: built-in functions for I/O, type introspection, coercion, and timing
-- **WebAssembly target**: compile to `.wasm` for web, bundler, and Node.js targets via `wasm-pack`
+Scarlet treats AI as a core part of the language, not an afterthought. Four built-in keywords let you call an LLM inline, anywhere an expression is valid. All primitives are powered by the Cerebras inference API and require `CEREBRAS_API_KEY` to be set in your environment.
+
+```bash
+export CEREBRAS_API_KEY=your_key_here
+```
+
+If the key is missing, Scarlet crashes immediately with a clear error. If the API call fails for any reason (network error, bad response), it also crashes with the error message.
+
+---
+
+### `generate` — text generation
+
+Sends a prompt to the LLM and returns its response as a string.
+
+```scarlet
+let capital = generate "What is the capital of France?";
+println(capital);   // Paris
+
+let poem = generate "Write a two-line poem about the ocean";
+println(poem);
+```
+
+---
+
+### `verify` — boolean reasoning
+
+Asks the LLM a yes/no question and returns `true` or `false`.
+
+```scarlet
+if (verify "Is water a renewable resource?") {
+    println("yes");
+} else {
+    println("no");
+}
+
+let rich = verify "Is Adam Sandler a billionaire?";
+println(rich);   // false
+```
+
+Use it in any boolean context: `if`, `while`, `&&`, `||`, variable assignment.
+
+---
+
+### `classify` — label classification
+
+Classifies text into one of the provided labels. Returns the matching label as a string.
+
+```scarlet
+let review = "The battery dies after two hours and the screen scratches easily.";
+let sentiment = classify review as "positive", "negative", "neutral";
+println(sentiment);   // negative
+
+let lang = classify "Bonjour le monde" as "English", "French", "Spanish", "German";
+println(lang);   // French
+```
+
+---
+
+### `extract` — information extraction
+
+Extracts a specific piece of information from a source text. Returns the extracted value as a string.
+
+```scarlet
+let bio = "Ada Lovelace was born in London in 1815 and is credited as the first computer programmer.";
+let birthplace = extract "birthplace" from bio;
+println(birthplace);   // London
+
+let year = extract "birth year" from bio;
+println(year);   // 1815
+```
+
+---
+
+### Combining AI primitives with language features
+
+Because these are plain expressions, they compose naturally with everything else in the language.
+
+```scarlet
+// Use generate inside string concatenation
+let lang = "Rust";
+let summary = generate "Summarize " + lang + " in one sentence";
+
+// classify driving a loop
+let inputs = ...;
+for (let i = 0; i < len(inputs); i = i + 1) {
+    let category = classify inputs[i] as "spam", "not spam";
+    println(category);
+}
+
+// verify guarding a branch
+if (verify "Is the user's input a valid email address?") {
+    // proceed
+}
+```
+
+---
+
+## Language Features
+
+- **Dynamic typing** — variables hold any value type at runtime
+- **Object-oriented** — classes, single inheritance, `this`, `super`, constructors via `init`
+- **Closures** — first-class functions that capture outer variables via upvalues
+- **Garbage collection** — tri-color mark-and-sweep GC
+- **String interning** — identical strings share one allocation, O(1) equality
+- **Bitwise operators** — `&`, `|`, `^`, `!` (bitwise NOT), `<<`, `>>`
+- **REPL** — interactive session with persistent state across lines
+- **Debug mode** — annotated bytecode disassembly before execution
+- **Native functions** — I/O, type introspection, coercion, timing
+- **WebAssembly target** — compile to `.wasm` for web and Node.js via `wasm-pack`
 
 ---
 
@@ -84,7 +185,7 @@ true || false   // true
 6 & 3       // 2   (AND)
 6 | 3       // 7   (OR)
 6 ^ 3       // 5   (XOR)
-!5          // bitwise NOT, same as Rust
+!5          // bitwise NOT
 2 << 3      // 16  (left shift)
 16 >> 2     // 4   (right shift)
 ```
@@ -181,7 +282,7 @@ a.speak();    // Dog makes a sound.
 
 **Inheritance**
 
-Use the `inherits` keyword to extend a class. Call superclass methods with `super`.
+Use `inherits` to extend a class. Call superclass methods with `super`.
 
 ```scarlet
 class Dog inherits Animal {
@@ -201,8 +302,6 @@ d.speak();    // Rex barks.
 ---
 
 ### Native Functions
-
-These functions are built in and available globally.
 
 | Function       | Description                                         | Platform    |
 | -------------- | --------------------------------------------------- | ----------- |
@@ -238,13 +337,15 @@ let x = 1;   // inline comment
 
 ## Architecture
 
-Scarlet is organized as a classic pipeline with a separate WebAssembly entry point.
+Scarlet is a classic pipeline with a separate WebAssembly entry point.
 
-Source text is fed into the **Scanner**, a lexer that produces a stream of tokens. Those tokens flow into the **Compiler**, a hand-crafted single-pass Pratt parser that consumes the token stream and directly emits bytecode, with no AST built. At runtime, the **Virtual Machine** executes that bytecode on a stack-based interpreter, handling function calls, closures, and triggering garbage collection. All heap-allocated objects (strings, functions, closures, class instances) live in the **Heap**, which also owns the string intern table and the globals table.
+Source text goes into the **Scanner**, a lexer producing a token stream. Tokens flow into the **Compiler**, a single-pass Pratt parser that emits bytecode directly with no AST. The **Virtual Machine** executes that bytecode on a stack-based interpreter, handling calls, closures, and GC. All heap objects live in the **Heap**, which owns the string intern table and globals.
 
-The garbage collector uses a mark-and-sweep strategy, tracing live objects from the VM stack, call frames, open upvalues, and globals, then sweeping anything unreachable.
+The GC uses mark-and-sweep, tracing live objects from the stack, call frames, open upvalues, and globals.
 
-The entire compiler and virtual machine weigh in at roughly **~500 KB** as a release binary.
+The AI primitives are implemented as native bytecode instructions. When the VM executes `generate`, `verify`, `classify`, or `extract`, it makes a synchronous HTTP call to the Cerebras inference API, blocks until the response arrives, and pushes the result onto the stack.
+
+Release binary size: **~500 KB**.
 
 ---
 
@@ -282,7 +383,7 @@ All `wasm-pack` outputs are written to `pkg/`.
 
 ### Run a script
 
-The `.scar` file extension is the convention for Scarlet script files.
+The `.scar` file extension is the convention for Scarlet source files.
 
 ```bash
 scarlet --run path/to/script.scar
@@ -311,4 +412,4 @@ MIT
 
 ## Note
 
-Scarlet is built for educational purposes, heavily inspired by the clox implementation of the Lox language from the excellent _Crafting Interpreters_ book by Bob Nystrom.
+Scarlet is built for educational purposes, heavily inspired by the clox implementation of the Lox language from _Crafting Interpreters_ by Bob Nystrom.
