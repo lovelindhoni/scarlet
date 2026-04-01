@@ -620,6 +620,8 @@ impl<'a> Parser<'a> {
             TokenType::Identifier => self.variable(can_assign),
             TokenType::Minus | TokenType::Bang => self.unary(),
             TokenType::True | TokenType::False | TokenType::Nil => self.literal(),
+            TokenType::Prompt => self.prompt_expr(),
+            TokenType::Verify => self.verify_expr(),
             TokenType::Super => self._super(),
             TokenType::This => self.this(),
             _ => Err(CompileError::MissingPrefixParser {
@@ -961,6 +963,16 @@ impl<'a> Parser<'a> {
             _ => {}
         }
         Ok(())
+    }
+
+    fn prompt_expr(&mut self) -> Result<()> {
+        self.parse_precedence(Precedence::Unary)?;
+        self.emit(Instruction::Prompt)
+    }
+
+    fn verify_expr(&mut self) -> Result<()> {
+        self.parse_precedence(Precedence::Unary)?;
+        self.emit(Instruction::Verify)
     }
 
     fn expression(&mut self) -> Result<()> {

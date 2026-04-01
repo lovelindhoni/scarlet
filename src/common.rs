@@ -132,6 +132,8 @@ pub enum Instruction {
     Equal,
     Greater,
     Less,
+    Prompt,
+    Verify,
     Pop,
 }
 
@@ -188,6 +190,9 @@ impl Instruction {
             Instruction::Equal => "EQUAL",
             Instruction::Greater => "GREATER",
             Instruction::Less => "LESS",
+
+            Instruction::Prompt => "PROMPT",
+            Instruction::Verify => "VERIFY",
 
             Instruction::Pop => "POP",
 

@@ -1,3 +1,4 @@
+mod ai;
 mod chunk;
 mod cli;
 mod common;

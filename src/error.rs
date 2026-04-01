@@ -117,6 +117,12 @@ pub enum InterpretError {
 
     #[error("{msg}", msg = .message)]
     NativeFunctionError { message: String },
+
+    #[error("{msg}", msg = .message)]
+    AiMissingApiKey { message: String },
+
+    #[error("{msg}", msg = .message)]
+    AiError { message: String },
 }
 
 fn compile_error_helper(message: &str, token: &Token) -> String {

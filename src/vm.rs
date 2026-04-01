@@ -5,6 +5,9 @@ use crate::error::InterpretError;
 use crate::heap::{BASE_GC_TRIGGER, Heap, HeapKey, Object, UpvalueState, mark_object, mark_value};
 use crate::log_error;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ai;
+
 const GC_HEAP_GROW_FACTOR: u32 = 2;
 const FRAMES_MAX: usize = 64;
 const STACK_MAX: usize = FRAMES_MAX * 256;
@@ -690,6 +693,47 @@ impl<'a> VirtualMachine<'a> {
 
                 Instruction::Modulo => {
                     self.binary_op(Instruction::Modulo)?;
+                }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                Instruction::Prompt => {
+                    let val = self.pop();
+                    let prompt_str = {
+                        let heap = self.heap.as_ref().unwrap();
+                        let key = get_obj_key(&val);
+                        heap.get_string(key).to_owned()
+                    };
+                    let response = ai::ai_prompt(&prompt_str)?;
+                    let key = self.heap.as_mut().unwrap().allocate_or_intern_string(&response);
+                    self.push(Value::Object(key));
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                Instruction::Prompt => {
+                    return Err(InterpretError::AiError {
+                        message: "AI primitives (prompt/verify) are not supported on WASM"
+                            .to_string(),
+                    });
+                }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                Instruction::Verify => {
+                    let val = self.pop();
+                    let prompt_str = {
+                        let heap = self.heap.as_ref().unwrap();
+                        let key = get_obj_key(&val);
+                        heap.get_string(key).to_owned()
+                    };
+                    let result = ai::ai_verify(&prompt_str)?;
+                    self.push(Value::Boolean(result));
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                Instruction::Verify => {
+                    return Err(InterpretError::AiError {
+                        message: "AI primitives (prompt/verify) are not supported on WASM"
+                            .to_string(),
+                    });
                 }
 
                 Instruction::Return => {
