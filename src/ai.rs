@@ -2,7 +2,7 @@ use std::env;
 
 use crate::error::InterpretError;
 
-const CEREBRAS_MODEL: &str = "llama-4-scout-17b-16e-instruct";
+const CEREBRAS_MODEL: &str = "qwen-3-235b-a22b-instruct-2507";
 const CEREBRAS_API_URL: &str = "https://api.cerebras.ai/v1/chat/completions";
 
 fn get_api_key() -> Result<String, InterpretError> {
@@ -64,14 +64,18 @@ fn call_llm(user_prompt: &str, system_prompt: Option<&str>) -> Result<String, In
 pub fn ai_generate(prompt: &str) -> Result<String, InterpretError> {
     call_llm(
         prompt,
-        Some("You should never use markdown or any rich formatting text like bolds or italics in your text response"),
+        Some(
+            "You should never use markdown or any rich formatting text like bolds or italics in your text response",
+        ),
     )
 }
 
 pub fn ai_verify(prompt: &str) -> Result<bool, InterpretError> {
     let response = call_llm(
         prompt,
-        Some("You are a verification engine. Respond with ONLY the word 'true' or 'false'. Nothing else."),
+        Some(
+            "You are a verification engine. Respond with ONLY the word 'true' or 'false'. Nothing else.",
+        ),
     )?;
     Ok(response.to_lowercase() == "true")
 }
@@ -84,7 +88,9 @@ pub fn ai_classify(text: &str, labels: &[String]) -> Result<String, InterpretErr
     );
     let response = call_llm(
         &prompt,
-        Some("You are a classification engine. Respond with ONLY the category label, nothing else. The label must be exactly one of the provided categories."),
+        Some(
+            "You are a classification engine. Respond with ONLY the category label, nothing else. The label must be exactly one of the provided categories.",
+        ),
     )?;
     Ok(response)
 }
@@ -96,6 +102,8 @@ pub fn ai_extract(query: &str, source: &str) -> Result<String, InterpretError> {
     );
     call_llm(
         &prompt,
-        Some("You are an extraction engine. Respond with ONLY the extracted information, nothing else. No explanation, no formatting."),
+        Some(
+            "You are an extraction engine. Respond with ONLY the extracted information, nothing else. No explanation, no formatting.",
+        ),
     )
 }
